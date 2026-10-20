@@ -266,6 +266,7 @@
       const all = [...fs.querySelectorAll(`input[data-${item}]`)];
       const n = all.filter((b) => b.checked).length;
       const g = fs.querySelector("input[data-group]");
+      if (!g) continue; // empty priority group: nothing to select
       g.checked = n === all.length;
       g.indeterminate = n > 0 && n < all.length;
     }

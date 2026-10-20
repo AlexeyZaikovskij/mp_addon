@@ -27,6 +27,8 @@ class Settings:
     session_idle_minutes: int
     default_lang: str
     csv_delimiter: str
+    outage_min_priority: int
+    degraded_min_priority: int
 
 
 def load_settings() -> Settings:
@@ -41,6 +43,8 @@ def load_settings() -> Settings:
         port=int(get("PORT", "8090")),
         session_idle_minutes=int(get("SESSION_IDLE_MINUTES", "480")),
         default_lang=get("DEFAULT_LANG", "en"),
+        outage_min_priority=int(get("OUTAGE_MIN_PRIORITY", "300")),
+        degraded_min_priority=int(get("DEGRADED_MIN_PRIORITY", "200")),
         csv_delimiter={"tab": "\t", "comma": ","}.get(get("CSV_DELIMITER", ";"), get("CSV_DELIMITER", ";")),
     )
 

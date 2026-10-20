@@ -37,11 +37,43 @@
 <section class="stats">
   <div class="stat"><span>{{ t("sum_total") }}</span><b>{{ s.total }}</b></div>
   <div class="stat"><span>{{ t("sum_active") }}</span><b>{{ s.active }}</b></div>
-  <div class="stat"><span>{{ t("sum_duration") }}</span><b>{{ fmt_duration(s.total_duration_sec) }}</b></div>
+  <div class="stat"><span>{{ t("sum_affected") }}</span><b>{{ s.objects_with_outage }} <small>/ {{ s.objects }}</small></b></div>
+  <div class="stat"><span>{{ t("sum_availability") }}</span><b>{{ "%.2f" | format(s.availability) }} %</b></div>
+  <div class="stat wide-stat"><span>{{ t("sum_worst") }}</span>
+    {% if s.worst %}<b class="worst" title="{{ s.worst[0] }}">{{ s.worst[0] }}</b><small>{{ t("tl_outage") }}: {{ fmt_duration(s.worst[1]) }}</small>
+    {% else %}<b>—</b>{% endif %}
+  </div>
   <div class="stat groups">
     {% for name, count in s.by_group %}
       <span class="prio prio-{{ name | lower }}">{{ name }} <b>{{ count }}</b></span>
     {% endfor %}
+  </div>
+</section>
+
+<section class="card" id="timeline">
+  <div class="section-head">
+    <h2>{{ t("timeline") }}</h2>
+    <div class="legend">
+      <span><i class="sw outage"></i>{{ t("tl_outage") }} <em>({{ t("tl_outage_hint") }})</em></span>
+      <span><i class="sw degraded"></i>{{ t("tl_degraded") }} <em>({{ t("tl_degraded_hint") }})</em></span>
+      <label class="inline"><input type="checkbox" id="only-problems" checked> {{ t("only_problems") }}</label>
+    </div>
+  </div>
+  <div class="tl">
+    <div class="tl-row tl-axis">
+      <div class="tl-label"></div>
+      <div class="tl-track">{% for tick in ticks %}<span class="tick" style="left: {{ tick.pct }}%">{{ tick.label }}</span>{% endfor %}</div>
+    </div>
+    {% for tr in timeline %}
+    <div class="tl-row{{ ' ok' if not tr.bars }}" >
+      <div class="tl-label depth-{{ [tr.row.depth, 3] | min }}" title="{{ tr.row.name }} — {{ tr.row.kind_name }}">{{ tr.row.name }}</div>
+      <div class="tl-track">
+        {% for tick in ticks %}<i class="tl-grid" style="left: {{ tick.pct }}%"></i>{% endfor %}
+        {% for b in tr.bars %}<span class="bar {{ b.level }}" style="left: {{ b.left }}%; width: {{ b.width }}%" data-tip="{{ b.tip }}"></span>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <p class="muted tl-empty" hidden>{{ t("no_problems") }}</p>
   </div>
 </section>
 
@@ -92,9 +124,42 @@
     <button type="button" id="next">{{ t("next") }}</button>
   </div>
 </section>
+
+<section class="card" id="availability">
+  <div class="section-head">
+    <h2>{{ t("availability_title") }}</h2>
+    <a class="btn small" href="/report/{{ job.id }}/export-availability.csv">CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table class="grid avail">
+      <thead><tr>
+        <th>{{ t("col_object") }}</th>
+        <th class="num-cell">{{ t("tl_outage") }}</th>
+        <th class="num-cell">{{ t("tl_degraded") }}</th>
+        <th class="num-cell">{{ t("col_availability") }}</th>
+        <th class="num-cell">{{ t("col_incidents") }}</th>
+        <th class="num-cell">{{ t("col_longest") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for a in report.availability %}
+        <tr class="{{ 'ok' if not a.outage_sec and not a.degraded_sec }}">
+          <td class="depth-{{ [a.depth, 3] | min }}">{{ a.name }} <em>{{ a.kind_name }}</em></td>
+          <td class="num-cell{{ ' bad' if a.outage_sec }}">{{ fmt_duration(a.outage_sec) }}</td>
+          <td class="num-cell">{{ fmt_duration(a.degraded_sec) }}</td>
+          <td class="num-cell{{ ' bad' if a.availability < 100 }}">{{ "%.2f" | format(a.availability) }} %</td>
+          <td class="num-cell">{{ a.incidents }}</td>
+          <td class="num-cell">{{ fmt_duration(a.longest_sec) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted note">{{ t("availability_note") }}</p>
+</section>
 {% endif %}
 {% endblock %}
 {% block scripts %}
+<div id="tip" class="tip" hidden></div>
 <script>window.I18N = {{ strings | tojson }};</script>
-<script src="/static/report.js"></script>
+<script src="/static/report.js?v={{ static_version }}"></script>
 {% endblock %}

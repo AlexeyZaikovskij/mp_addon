@@ -1,4 +1,5 @@
 """MultiProbe report add-on: web entry point."""
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from . import i18n, jobs, mp_client, sessions
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
-from .reports import export
+from .reports import export, timeline
 
 
 @asynccontextmanager
@@ -25,6 +26,8 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="MultiProbe Reports", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "app" / "templates")
+# Appended to static URLs so browsers fetch fresh CSS/JS after the add-on is restarted or updated.
+templates.env.globals["static_version"] = str(int(time.time()))
 
 
 class SessionExpired(Exception):
@@ -340,9 +343,17 @@ async def report_page(job_id: str, request: Request, session: sessions.Session =
     lang = i18n.pick_lang(request)
     tz = _user_tz(session)
     period = [datetime.fromisoformat(v).astimezone(tz) for v in job.params["period_utc"]]
+    ticks, timeline_rows = [], []
+    if job.state == "done":
+        report = job.result
+        # The timeline ends at generation time when the period reaches into the future.
+        tl_end = min(report.period[1], report.generated.astimezone(tz))
+        ticks, timeline_rows = timeline.build(report.availability, report.period[0], tl_end, i18n.translator(lang))
     return render(
         request,
         "report.html",
+        ticks=ticks,
+        timeline=timeline_rows,
         session=session,
         job=job,
         report=job.result if job.state == "done" else None,
@@ -350,6 +361,18 @@ async def report_page(job_id: str, request: Request, session: sessions.Session =
         fmt_duration=export.fmt_duration,
         generated=export.fmt_dt(job.result.generated.astimezone(tz)) if job.state == "done" else "",
         strings=i18n.bundle(lang),
+    )
+
+
+@app.get("/report/{job_id}/export-availability.csv")
+async def report_export_availability(job_id: str, request: Request, session: sessions.Session = Depends(current_session)):
+    report = _done(_job(job_id, session))
+    t = i18n.translator(i18n.pick_lang(request))
+    stamp = report.generated.astimezone(_user_tz(session)).strftime("%Y%m%d_%H%M")
+    return Response(
+        export.availability_csv(report, t, settings.csv_delimiter),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="ServiceAvailability_{stamp}.csv"'},
     )
 
 
@@ -370,6 +393,8 @@ async def report_export(job_id: str, fmt: str, request: Request, session: sessio
             "user": job.params.get("user", ""),
             "server": job.params.get("server", ""),
             "period": [datetime.fromisoformat(v).astimezone(tz) for v in job.params["period_utc"]],
+            "outage_min": settings.outage_min_priority,
+            "degraded_min": settings.degraded_min_priority,
         }
         body, media = export.alarms_xml(report, meta), "application/xml"
     else:

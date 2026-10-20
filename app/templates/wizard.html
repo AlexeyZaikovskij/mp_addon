@@ -75,5 +75,5 @@
 {% endblock %}
 {% block scripts %}
 <script>window.I18N = {{ strings | tojson }}; window.USER_TZ = {{ session.time_zone | tojson }};</script>
-<script src="/static/wizard.js"></script>
+<script src="/static/wizard.js?v={{ static_version }}"></script>
 {% endblock %}

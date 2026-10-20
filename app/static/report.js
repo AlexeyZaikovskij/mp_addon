@@ -28,6 +28,33 @@
     return;
   }
 
+  // --- Timeline: tooltips and the "only objects with problems" switch ----------
+  const tip = $("#tip");
+  document.addEventListener("mouseover", (e) => {
+    const bar = e.target.closest("[data-tip]");
+    if (!bar) { tip.hidden = true; return; }
+    tip.textContent = bar.dataset.tip;
+    tip.hidden = false;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (tip.hidden) return;
+    const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    const y = e.clientY + 16 + tip.offsetHeight > window.innerHeight ? e.clientY - tip.offsetHeight - 10 : e.clientY + 16;
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+  });
+
+  const onlyProblems = $("#only-problems");
+  if (onlyProblems) {
+    const apply = () => {
+      for (const el of [$(".tl"), $("table.avail")]) el.classList.toggle("only-problems", onlyProblems.checked);
+      const anyProblem = document.querySelector(".tl-row:not(.ok):not(.tl-axis)");
+      $(".tl-empty").hidden = !(onlyProblems.checked && !anyProblem);
+    };
+    onlyProblems.addEventListener("change", apply);
+    apply();
+  }
+
   // --- Result table -------------------------------------------------------------
   const card = $("#table-card");
   if (!card) return;

@@ -46,7 +46,26 @@ def alarms_csv(report: AlarmReport, t, delimiter: str) -> bytes:
             + [status_text(r, t), t("yes") if r.confirmed else t("no")]
         )
     # BOM so that Excel opens UTF-8 (Cyrillic names) correctly
-    return ("﻿" + buf.getvalue()).encode("utf-8")
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def availability_csv(report: AlarmReport, t, delimiter: str) -> bytes:
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow([
+        t("col_stream"), t("col_object"), t("col_kind"), t("tl_outage"), t("tl_degraded"),
+        t("col_availability") + " %", t("col_incidents"), t("col_longest"),
+    ])
+    stream = ""
+    for a in report.availability:
+        if a.depth == 0:
+            stream = a.name
+        writer.writerow([
+            stream, a.name, a.kind_name, fmt_duration(a.outage_sec), fmt_duration(a.degraded_sec),
+            f"{a.availability:.2f}".replace(".", "," if delimiter == ";" else "."),
+            a.incidents, fmt_duration(a.longest_sec),
+        ])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 
 def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
@@ -74,10 +93,38 @@ def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
     summary = ET.SubElement(
         root,
         "Summary",
-        {"total": str(s["total"]), "active": str(s["active"]), "totalDurationSec": str(s["total_duration_sec"])},
+        {
+            "total": str(s["total"]),
+            "active": str(s["active"]),
+            "objects": str(s["objects"]),
+            "objectsWithOutage": str(s["objects_with_outage"]),
+            "availabilityPercent": f'{s["availability"]:.2f}',
+        },
     )
     for name, count in s["by_group"]:
         ET.SubElement(summary, "Group", {"name": name, "count": str(count)})
+
+    avail = ET.SubElement(
+        root,
+        "ServiceAvailability",
+        {"outageMinPriority": str(meta["outage_min"]), "degradedMinPriority": str(meta["degraded_min"])},
+    )
+    for a in report.availability:
+        el = ET.SubElement(
+            avail,
+            "Object",
+            {
+                "id": a.object_id,
+                "kind": a.kind,
+                "depth": str(a.depth),
+                "outageSec": str(a.outage_sec),
+                "degradedSec": str(a.degraded_sec),
+                "availabilityPercent": f"{a.availability:.2f}",
+                "incidents": str(a.incidents),
+                "longestSec": str(a.longest_sec),
+            },
+        )
+        el.text = a.name
 
     alarms = ET.SubElement(root, "Alarms")
     for r in report.rows:

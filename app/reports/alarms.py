@@ -7,7 +7,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .. import mp_client
+from ..config import settings
 from ..jobs import Job
+from . import availability as avail_calc
+from .availability import AvailabilityRow
 
 WINDOW = timedelta(hours=6)  # the period is fetched in slices of this size ...
 CONCURRENCY = 4              # ... this many at a time
@@ -39,8 +42,9 @@ class AlarmReport:
     params: dict[str, Any]
     rows: list[AlarmRow]
     summary: dict[str, Any] = field(default_factory=dict)
+    availability: list[AvailabilityRow] = field(default_factory=list)
+    period: tuple[datetime, datetime] | None = None  # in the user's time zone
     generated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    truncated: bool = False
 
 
 def _parse(value: str | None, tz: ZoneInfo) -> datetime | None:
@@ -157,18 +161,28 @@ async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
         )
     rows.sort(key=lambda x: x.detected, reverse=True)
 
-    report = AlarmReport(params=p, rows=rows)
-    report.summary = summarize(rows, await mp_client.alarm_groups(token))
+    report = AlarmReport(params=p, rows=rows, period=(begin.astimezone(tz), end.astimezone(tz)))
+    report.availability = avail_calc.compute(
+        rows, all_objects, selected, report.period[0], report.period[1], now,
+        settings.outage_min_priority, settings.degraded_min_priority,
+    )
+    report.summary = summarize(rows, report.availability, await mp_client.alarm_groups(token))
     return report
 
 
-def summarize(rows: list[AlarmRow], groups: list[dict]) -> dict[str, Any]:
+def summarize(
+    rows: list[AlarmRow], avail: list[AvailabilityRow], groups: list[dict]
+) -> dict[str, Any]:
     by_group = Counter(r.group for r in rows)
     order = {g["name"]: -g.get("beginPriority", 0) for g in groups}  # most severe first
+    worst = max(avail, key=lambda a: a.outage_sec, default=None)
     return {
         "total": len(rows),
         "active": sum(r.active for r in rows),
-        "total_duration_sec": sum(r.duration_sec for r in rows),
+        "objects": len(avail),
+        "objects_with_outage": sum(a.outage_sec > 0 for a in avail),
+        "availability": round(sum(a.availability for a in avail) / len(avail), 2) if avail else 100.0,
+        "worst": (worst.name, worst.outage_sec) if worst and worst.outage_sec else None,
         "by_group": sorted(by_group.items(), key=lambda kv: (order.get(kv[0], 0), kv[0])),
         "top_alarms": Counter(r.alarm for r in rows).most_common(10),
         "top_objects": Counter(r.object for r in rows).most_common(10),

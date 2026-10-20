@@ -177,8 +177,8 @@ def measures_csv(report, t, delimiter: str) -> bytes:
             if p.avg is None:
                 continue
             nums = [p.avg] if raw else [p.min, p.avg, p.max]
-            writer.writerow([fmt_dt(p.time), s.stream, s.object, s.analyzer, s.measure, s.unit]
-                            + [fmt_num(n, comma) for n in nums])
+            writer.writerow([fmt_dt(p.time), s.stream, s.object, s.analyzer, s.measure, s.display_unit]
+                            + [fmt_num(s.d(n), comma) for n in nums])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 
@@ -190,8 +190,8 @@ def measures_summary_csv(report, t, delimiter: str) -> bytes:
                      t("col_min"), t("col_avg"), t("col_max"), t("col_std"), t("col_coverage") + " %"])
     for s in report.series:
         st = s.stats
-        writer.writerow([s.stream, s.object, s.analyzer, s.measure, s.unit]
-                        + [fmt_num(st.get(k), comma) for k in ("min", "avg", "max", "std")]
+        writer.writerow([s.stream, s.object, s.analyzer, s.measure, s.display_unit]
+                        + [fmt_num(s.d(st.get(k)), comma) for k in ("min", "avg", "max", "std")]
                         + [fmt_num(st["coverage"], comma) if st.get("coverage") is not None else ""])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 

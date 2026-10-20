@@ -42,10 +42,10 @@
         <tr>
           <td>{{ s.stream }}</td>
           <td>{{ s.object }}</td>
-          <td class="num-cell">{{ fmt_num(s.stats.min, False, 2) }}</td>
-          <td class="num-cell">{{ fmt_num(s.stats.avg, False, 2) }}</td>
-          <td class="num-cell">{{ fmt_num(s.stats.max, False, 2) }}</td>
-          <td class="num-cell">{{ fmt_num(s.stats.std, False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.d(s.stats.min), False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.d(s.stats.avg), False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.d(s.stats.max), False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.d(s.stats.std), False, 2) }}</td>
           <td class="num-cell{{ ' bad' if s.stats.coverage is not none and s.stats.coverage < 90 }}">
             {% if s.stats.coverage is not none %}{{ "%.0f" | format(s.stats.coverage) }} %{% else %}{{ s.stats.points }}{% endif %}</td>
         </tr>

@@ -518,9 +518,9 @@ async def api_report_charts(job_id: str, session: sessions.Session = Depends(cur
                 {
                     "name": s.object,
                     "stream": s.stream,
-                    "avg": [[_wall_ms(p.time), p.avg] for p in s.points],
-                    "min": [[_wall_ms(p.time), p.min] for p in s.points],
-                    "max": [[_wall_ms(p.time), p.max] for p in s.points],
+                    "avg": [[_wall_ms(p.time), s.d(p.avg)] for p in s.points],
+                    "min": [[_wall_ms(p.time), s.d(p.min)] for p in s.points],
+                    "max": [[_wall_ms(p.time), s.d(p.max)] for p in s.points],
                 }
                 for s in series[:MAX_SERIES_PER_CHART]
             ],
@@ -562,10 +562,10 @@ async def api_report_points(
                 "stream": s.stream,
                 "object": s.object,
                 "measure": s.measure,
-                "unit": s.unit,
-                "min": export.fmt_num(p.min),
-                "avg": export.fmt_num(p.avg),
-                "max": export.fmt_num(p.max),
+                "unit": s.display_unit,
+                "min": export.fmt_num(s.d(p.min), False, 3),
+                "avg": export.fmt_num(s.d(p.avg), False, 3),
+                "max": export.fmt_num(s.d(p.max), False, 3),
             }
             for s, p in rows[start : start + size]
         ],

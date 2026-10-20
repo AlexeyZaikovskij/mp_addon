@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from .. import mp_client
 from ..jobs import Job
+from . import units
 
 CONCURRENCY = 4
 TARGET_BUCKETS = 720            # "auto" picks the finest step that stays under this per series
@@ -50,10 +51,16 @@ class Series:
     unit: str
     points: list[Point] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
+    display_unit: str = ""   # unit shown to people, e.g. Mbit/s for a bps measure
+    mult: float = 1.0        # display value = raw value × mult
 
     @property
     def key(self) -> str:
         return f"{self.analyzer_id}|{self.column}"
+
+    def d(self, value: float | None) -> float | None:
+        """A raw value in the display unit."""
+        return None if value is None else value * self.mult
 
 
 @dataclass
@@ -66,12 +73,12 @@ class MeasureReport:
     generated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def measures(self) -> list[tuple[str, str, str]]:
-        """Distinct (key, title, unit), in the order the user's analyzers/measures come."""
+        """Distinct (key, title, display unit), in the order the user's analyzers/measures come."""
         seen, out = set(), []
         for s in self.series:
             if s.key not in seen:
                 seen.add(s.key)
-                out.append((s.key, f"{s.measure}", s.unit))
+                out.append((s.key, f"{s.measure}", s.display_unit))
         return out
 
 
@@ -175,10 +182,25 @@ async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
     measure_order = {f"{aid}|{c}": (i, j) for i, (aid, cols) in enumerate((p.get("measures") or {}).items())
                      for j, c in enumerate(cols)}
     series.sort(key=lambda s: (measure_order.get(s.key, (99, 99)), s.stream.lower(), s.object.lower(), order.get(s.object_id, 0)))
+    _assign_display_units(series)
     return MeasureReport(
         params=p, series=series, resolution=resolution, step=step,
         period=(begin.astimezone(tz), end.astimezone(tz)),
     )
+
+
+def _assign_display_units(series: list[Series]) -> None:
+    """One display unit per measurement, from the largest typical (average) value of its objects."""
+    by_key: dict[str, list[Series]] = {}
+    for s in series:
+        by_key.setdefault(s.key, []).append(s)
+    for group in by_key.values():
+        values = [abs(v) for s in group for v in (s.stats.get("avg"), s.stats.get("max")) if v is not None]
+        avgs = [abs(s.stats["avg"]) for s in group if s.stats.get("avg") is not None]
+        magnitude = max(avgs) if avgs and max(avgs) > 0 else (max(values) if values else None)
+        label, mult = units.choose(group[0].unit, magnitude)
+        for s in group:
+            s.display_unit, s.mult = label, mult
 
 
 def _points(item: dict, column: str, tz: ZoneInfo, raw: bool) -> list[Point]:

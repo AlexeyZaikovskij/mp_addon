@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from . import i18n, jobs, mp_client, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
+from .reports import measures as measure_report
 from .reports import export, timeline
 
 
@@ -181,6 +182,7 @@ async def api_measures(req: MeasuresRequest, session: sessions.Session = Depends
                 "measures": [
                     {"column": m["columnName"], "name": m["name"], "unit": m.get("unit") or ""}
                     for m in measures
+                    if not str(m.get("dataType") or "").startswith("xml")
                 ],
             }
         )
@@ -224,6 +226,7 @@ class ReportRequest(BaseModel):
     period_from: datetime | None = None  # fixed period, naive, in the user's MultiProbe time zone
     period_to: datetime | None = None
     with_chart: bool = False
+    resolution: Literal["auto", "1m", "5m", "15m", "30m", "1h", "3h", "6h", "1d", "raw"] = "auto"
 
 
 def _user_tz(session: sessions.Session) -> ZoneInfo:
@@ -252,10 +255,13 @@ def _period(req: ReportRequest, tz: ZoneInfo) -> tuple[datetime, datetime]:
 
 
 def _start_report(req: ReportRequest, session: sessions.Session, template_name: str = "") -> jobs.Job:
-    if req.type == "measures":
-        raise HTTPException(501, "Measurement reports arrive in the next stage.")
     tz = _user_tz(session)
     begin, end = _period(req, tz)
+    if req.type == "measures":
+        if not any(req.measures.values()):
+            raise HTTPException(422, "No measures selected")
+        if req.resolution == "raw" and end - begin > measure_report.RAW_MAX_PERIOD:
+            raise HTTPException(422, i18n.translator("en")("err_raw_too_long"))
     params = {
         **req.model_dump(mode="json"),
         "period_utc": [begin.isoformat(), end.isoformat()],
@@ -268,6 +274,8 @@ def _start_report(req: ReportRequest, session: sessions.Session, template_name: 
     async def work(job: jobs.Job):
         nodes = await mp_client.nodes(token)
         job.params["server"] = next((n["name"] for n in nodes if n["nodeID"] == req.node_id), str(req.node_id))
+        if req.type == "measures":
+            return await measure_report.build(job, token, str(tz))
         return await alarm_report.build(job, token, str(tz))
 
     return jobs.start(session.user_id, params, work)
@@ -383,7 +391,7 @@ def _job(job_id: str, session: sessions.Session) -> jobs.Job:
     return job
 
 
-def _done(job: jobs.Job) -> alarm_report.AlarmReport:
+def _done(job: jobs.Job):
     if job.state != "done":
         raise HTTPException(409, "Report is not ready")
     return job.result
@@ -461,25 +469,111 @@ async def report_page(job_id: str, request: Request, session: sessions.Session =
     lang = i18n.pick_lang(request)
     tz = _user_tz(session)
     period = [datetime.fromisoformat(v).astimezone(tz) for v in job.params["period_utc"]]
+    done = job.state == "done"
+    report = job.result if done else None
+    measures = job.params.get("type") == "measures"
+    context = dict(
+        session=session,
+        job=job,
+        report=report,
+        period=[export.fmt_dt(p) for p in period],
+        fmt_duration=export.fmt_duration,
+        fmt_num=export.fmt_num,
+        generated=export.fmt_dt(report.generated.astimezone(tz)) if done else "",
+        strings=i18n.bundle(lang),
+    )
+    if measures:
+        return render(request, "report_measures.html", **context)
     ticks, timeline_rows = [], []
-    if job.state == "done":
-        report = job.result
+    if done:
         # The timeline ends at generation time when the period reaches into the future.
         tl_end = min(report.period[1], report.generated.astimezone(tz))
         ticks, timeline_rows = timeline.build(report.availability, report.period[0], tl_end, i18n.translator(lang))
-    return render(
-        request,
-        "report.html",
-        ticks=ticks,
-        timeline=timeline_rows,
-        session=session,
-        job=job,
-        report=job.result if job.state == "done" else None,
-        period=[export.fmt_dt(p) for p in period],
-        fmt_duration=export.fmt_duration,
-        generated=export.fmt_dt(job.result.generated.astimezone(tz)) if job.state == "done" else "",
-        strings=i18n.bundle(lang),
-    )
+    return render(request, "report.html", ticks=ticks, timeline=timeline_rows, **context)
+
+
+def _wall_ms(value: datetime) -> int:
+    """Wall-clock time in the user's zone as epoch ms, for a chart axis running in UTC mode:
+    the browser then shows MultiProbe-zone times whatever its own time zone is."""
+    return int(value.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+MAX_SERIES_PER_CHART = 8  # categorical palette size; more objects are listed in the table only
+
+
+@app.get("/api/report/{job_id}/charts")
+async def api_report_charts(job_id: str, session: sessions.Session = Depends(current_session)):
+    """One chart per measure, one line (bucket average) per object; min–max band for a single object."""
+    report = _done(_job(job_id, session))
+    charts = []
+    for key, title, unit in report.measures():
+        series = [s for s in report.series if s.key == key]
+        charts.append({
+            "key": key,
+            "title": title,
+            "unit": unit,
+            "analyzer": series[0].analyzer if series else "",
+            "total": len(series),
+            "series": [
+                {
+                    "name": s.object,
+                    "stream": s.stream,
+                    "avg": [[_wall_ms(p.time), p.avg] for p in s.points],
+                    "min": [[_wall_ms(p.time), p.min] for p in s.points],
+                    "max": [[_wall_ms(p.time), p.max] for p in s.points],
+                }
+                for s in series[:MAX_SERIES_PER_CHART]
+            ],
+        })
+    return {
+        "raw": report.resolution == "raw",
+        "step_ms": int(report.step.total_seconds() * 1000) if report.step else None,
+        "from": _wall_ms(report.period[0]),
+        "to": _wall_ms(report.period[1]),
+        "charts": charts,
+    }
+
+
+@app.get("/api/report/{job_id}/points")
+async def api_report_points(
+    job_id: str, page: int = 1, size: int = 100, measure: str = "", q: str = "",
+    session: sessions.Session = Depends(current_session),
+):
+    """Measurement values as a paged table (newest first)."""
+    report = _done(_job(job_id, session))
+    needle = q.lower()
+    rows = [
+        (s, p)
+        for s in report.series
+        if (not measure or s.key == measure) and (not needle or needle in f"{s.object}\n{s.stream}".lower())
+        for p in s.points
+        if p.avg is not None
+    ]
+    rows.sort(key=lambda sp: sp[1].time, reverse=True)
+    size = max(10, min(size, 500))
+    start = (max(page, 1) - 1) * size
+    return {
+        "total": len(rows),
+        "page": max(page, 1),
+        "size": size,
+        "rows": [
+            {
+                "time": export.fmt_dt(p.time),
+                "stream": s.stream,
+                "object": s.object,
+                "measure": s.measure,
+                "unit": s.unit,
+                "min": export.fmt_num(p.min),
+                "avg": export.fmt_num(p.avg),
+                "max": export.fmt_num(p.max),
+            }
+            for s, p in rows[start : start + size]
+        ],
+    }
+
+
+def _download(body: bytes, media: str, name: str) -> Response:
+    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/report/{job_id}/export-availability.csv")
@@ -487,11 +581,17 @@ async def report_export_availability(job_id: str, request: Request, session: ses
     report = _done(_job(job_id, session))
     t = i18n.translator(i18n.pick_lang(request))
     stamp = report.generated.astimezone(_user_tz(session)).strftime("%Y%m%d_%H%M")
-    return Response(
-        export.availability_csv(report, t, settings.csv_delimiter),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="ServiceAvailability_{stamp}.csv"'},
-    )
+    return _download(export.availability_csv(report, t, settings.csv_delimiter),
+                     "text/csv; charset=utf-8", f"ServiceAvailability_{stamp}.csv")
+
+
+@app.get("/report/{job_id}/export-summary.csv")
+async def report_export_summary(job_id: str, request: Request, session: sessions.Session = Depends(current_session)):
+    report = _done(_job(job_id, session))
+    t = i18n.translator(i18n.pick_lang(request))
+    stamp = report.generated.astimezone(_user_tz(session)).strftime("%Y%m%d_%H%M")
+    return _download(export.measures_summary_csv(report, t, settings.csv_delimiter),
+                     "text/csv; charset=utf-8", f"MeasurementSummary_{stamp}.csv")
 
 
 @app.get("/report/{job_id}/export.{fmt}")
@@ -500,21 +600,22 @@ async def report_export(job_id: str, fmt: str, request: Request, session: sessio
     report = _done(job)
     tz = _user_tz(session)
     stamp = report.generated.astimezone(tz).strftime("%Y%m%d_%H%M")
-    name = f"AlarmHistory_{stamp}"
+    measures = job.params.get("type") == "measures"
+    name = f"{'Measurements' if measures else 'AlarmHistory'}_{stamp}.{fmt}"
+    meta = {
+        "tz": tz,
+        "time_zone": str(tz),
+        "user": job.params.get("user", ""),
+        "server": job.params.get("server", ""),
+        "period": [datetime.fromisoformat(v).astimezone(tz) for v in job.params["period_utc"]],
+        "outage_min": settings.outage_min_priority,
+        "degraded_min": settings.degraded_min_priority,
+    }
+    t = i18n.translator(i18n.pick_lang(request))
     if fmt == "csv":
-        t = i18n.translator(i18n.pick_lang(request))
-        body, media = export.alarms_csv(report, t, settings.csv_delimiter), "text/csv; charset=utf-8"
-    elif fmt == "xml":
-        meta = {
-            "tz": tz,
-            "time_zone": str(tz),
-            "user": job.params.get("user", ""),
-            "server": job.params.get("server", ""),
-            "period": [datetime.fromisoformat(v).astimezone(tz) for v in job.params["period_utc"]],
-            "outage_min": settings.outage_min_priority,
-            "degraded_min": settings.degraded_min_priority,
-        }
-        body, media = export.alarms_xml(report, meta), "application/xml"
-    else:
-        raise HTTPException(404, "Unknown format")
-    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}.{fmt}"'})
+        body = (export.measures_csv if measures else export.alarms_csv)(report, t, settings.csv_delimiter)
+        return _download(body, "text/csv; charset=utf-8", name)
+    if fmt == "xml":
+        body = (export.measures_xml if measures else export.alarms_xml)(report, meta)
+        return _download(body, "application/xml", name)
+    raise HTTPException(404, "Unknown format")

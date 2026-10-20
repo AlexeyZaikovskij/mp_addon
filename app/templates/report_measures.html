@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{% set report_title = t("report_measures_title") %}
+{% set progress_label = t("values_loaded") %}
+{% if report %}{% set extra_meta = [(t("resolution"), t("res_" + report.resolution))] %}{% endif %}
+{% include "_report_head.html" %}
+{% if job.state == "done" %}
+
+{% if not report.series %}
+<section class="card"><p class="muted">{{ t("no_measure_data") }}</p></section>
+{% else %}
+
+{% if job.params.with_chart %}
+<section id="charts" data-job="{{ job.id }}">
+  <p class="muted">{{ t("loading") }}</p>
+</section>
+{% endif %}
+
+<section class="card" id="summary">
+  <div class="section-head">
+    <h2>{{ t("measure_summary") }}</h2>
+    <a class="btn small" href="/report/{{ job.id }}/export-summary.csv">CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table class="grid summary">
+      <thead><tr>
+        <th>{{ t("col_stream") }}</th>
+        <th>{{ t("col_object") }}</th>
+        <th class="num-cell">{{ t("col_min") }}</th>
+        <th class="num-cell">{{ t("col_avg") }}</th>
+        <th class="num-cell">{{ t("col_max") }}</th>
+        <th class="num-cell">{{ t("col_std") }}</th>
+        <th class="num-cell">{{ t("col_coverage") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for key, title, unit in report.measures() %}
+        {% set group = report.series | selectattr("key", "equalto", key) | list %}
+        <tr class="group-row"><td colspan="7">{{ title }}{% if unit %} <em>{{ unit }}</em>{% endif %}
+          <span class="muted">· {{ group[0].analyzer }}</span></td></tr>
+        {% for s in group %}
+        <tr>
+          <td>{{ s.stream }}</td>
+          <td>{{ s.object }}</td>
+          <td class="num-cell">{{ fmt_num(s.stats.min, False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.stats.avg, False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.stats.max, False, 2) }}</td>
+          <td class="num-cell">{{ fmt_num(s.stats.std, False, 2) }}</td>
+          <td class="num-cell{{ ' bad' if s.stats.coverage is not none and s.stats.coverage < 90 }}">
+            {% if s.stats.coverage is not none %}{{ "%.0f" | format(s.stats.coverage) }} %{% else %}{{ s.stats.points }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted note">{{ t("measure_note") }}</p>
+</section>
+
+<section class="card" id="points-card" data-job="{{ job.id }}">
+  <h2>{{ t("measure_values") }}</h2>
+  <div class="toolbar">
+    <input type="search" id="q" placeholder="{{ t('search') }}">
+    <select id="measure">
+      <option value="">{{ t("all_measures") }}</option>
+      {% for key, title, unit in report.measures() %}<option value="{{ key }}">{{ title }}{% if unit %} ({{ unit }}){% endif %}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>{{ t("col_time") }}</th>
+        <th>{{ t("col_stream") }}</th>
+        <th>{{ t("col_object") }}</th>
+        <th>{{ t("col_measure") }}</th>
+        {% if report.resolution == "raw" %}
+        <th class="num-cell">{{ t("col_value") }}</th>
+        {% else %}
+        <th class="num-cell">{{ t("col_min") }}</th>
+        <th class="num-cell">{{ t("col_avg") }}</th>
+        <th class="num-cell">{{ t("col_max") }}</th>
+        {% endif %}
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span id="page-info" class="muted"></span>
+    <button type="button" id="prev">{{ t("prev") }}</button>
+    <button type="button" id="next">{{ t("next") }}</button>
+  </div>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<div id="tip" class="tip" hidden></div>
+<script>window.I18N = {{ strings | tojson }}; window.RAW = {{ (report and report.resolution == "raw") | tojson }};</script>
+{% if job.state == "running" %}
+<script src="/static/report.js?v={{ static_version() }}"></script>
+{% elif report and report.series %}
+{% if job.params.with_chart %}<script src="/static/vendor/echarts.min.js"></script>{% endif %}
+<script src="/static/measures.js?v={{ static_version() }}"></script>
+{% endif %}
+{% endblock %}

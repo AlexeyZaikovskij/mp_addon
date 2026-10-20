@@ -78,7 +78,15 @@
 
   <section class="card" id="options-card" hidden>
     <h2><span class="num">6</span>{{ t("step_options") }}</h2>
-    <label class="inline"><input type="checkbox" id="with-chart"> {{ t("with_chart") }}</label>
+    <label class="inline"><input type="checkbox" id="with-chart" checked> {{ t("with_chart") }}</label>
+    <label class="inline">{{ t("resolution") }}
+      <select id="resolution">
+        <option value="auto">{{ t("res_auto") }}</option>
+        {% for r in ["1m", "5m", "15m", "30m", "1h", "3h", "6h", "1d"] %}<option value="{{ r }}">{{ t("res_" + r) }}</option>{% endfor %}
+        <option value="raw">{{ t("res_raw") }}</option>
+      </select>
+    </label>
+    <p class="muted note">{{ t("resolution_hint") }}</p>
   </section>
 
   <div class="actions">

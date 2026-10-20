@@ -132,6 +132,42 @@ async def alarm_groups(token: str) -> list[dict]:
     return await _cached("alarm_groups", token, "GET", "/api/Monitor/AlarmGroup/Get")
 
 
+# --- Measurements -----------------------------------------------------------
+
+def _measure_body(analyzer_id: int, object_ids: list[str], columns: list[str], begin: str, end: str,
+                  interpolation: dict) -> dict:
+    return {
+        "dataFilter": {
+            "beginDate": begin,
+            "endDate": end,
+            "pagingProperty": {"topCount": 1_000_000, "fromIndex": 0},  # default page is only 20
+            "interpolation": interpolation,
+        },
+        "analyzeMonitoringObjectList": [{"analyzerID": analyzer_id, "compoundObjectID": oid} for oid in object_ids],
+        # measureNameList takes the measure *column* names, not the display names
+        "analyzerMeasuresList": [{"analyzerID": analyzer_id, "measureNameList": columns}],
+    }
+
+
+async def measure_data(token: str, analyzer_id: int, object_ids: list[str], columns: list[str],
+                       begin: str, end: str, interpolation: dict) -> list[dict]:
+    """Per object: `boxPlotDataList` (aggregated buckets) or `dataList` (raw points when
+    interpolation is {"forceDisableInterpolation": true})."""
+    body = _measure_body(analyzer_id, object_ids, columns, begin, end, interpolation)
+    resp = await call(token, "POST", "/api/Measurement/LogData/Find", body) or {}
+    return resp.get("measurementResponseItemList") or []
+
+
+async def measure_averages(token: str, analyzer_id: int, object_id: str, columns: list[str],
+                           begin: str, end: str) -> dict[str, dict]:
+    """Exact average and standard deviation over the whole period: {column: {average, standardDeviation}}.
+    One object per call: the response items carry no object id, only their order."""
+    body = _measure_body(analyzer_id, [object_id], columns, begin, end, {})
+    resp = await call(token, "POST", "/api/Measurement/LogData/FindAverages", body) or {}
+    items = resp.get("data") or []
+    return (items[0].get("values") or {}) if items else {}
+
+
 # --- Alarm log --------------------------------------------------------------
 
 ALARM_PAGE = 500  # bigger pages get slower per row (1000 rows ~15 s vs 500 rows ~5 s)

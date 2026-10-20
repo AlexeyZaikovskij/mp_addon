@@ -150,3 +150,83 @@ def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
 
     ET.indent(root)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+# --- Measurement report --------------------------------------------------------
+
+def fmt_num(value, decimal_comma: bool = False, digits: int = 4) -> str:
+    """Up to `digits` decimals, no trailing zeros; empty for missing values."""
+    if value is None:
+        return ""
+    text = f"{value:.{digits}f}".rstrip("0").rstrip(".") if abs(value) < 1e15 else f"{value:.0f}"
+    if text in ("-0", ""):
+        text = "0"
+    return text.replace(".", ",") if decimal_comma else text
+
+
+def measures_csv(report, t, delimiter: str) -> bytes:
+    """Long format: one line per object, measure and time bucket."""
+    comma = delimiter == ";"
+    raw = report.resolution == "raw"
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=delimiter, lineterminator="\r\n")
+    values = [t("col_value")] if raw else [t("col_min"), t("col_avg"), t("col_max")]
+    writer.writerow([t("col_time"), t("col_stream"), t("col_object"), t("col_analyzer"), t("col_measure"), t("col_unit")] + values)
+    for s in report.series:
+        for p in s.points:
+            if p.avg is None:
+                continue
+            nums = [p.avg] if raw else [p.min, p.avg, p.max]
+            writer.writerow([fmt_dt(p.time), s.stream, s.object, s.analyzer, s.measure, s.unit]
+                            + [fmt_num(n, comma) for n in nums])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def measures_summary_csv(report, t, delimiter: str) -> bytes:
+    comma = delimiter == ";"
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow([t("col_stream"), t("col_object"), t("col_analyzer"), t("col_measure"), t("col_unit"),
+                     t("col_min"), t("col_avg"), t("col_max"), t("col_std"), t("col_coverage") + " %"])
+    for s in report.series:
+        st = s.stats
+        writer.writerow([s.stream, s.object, s.analyzer, s.measure, s.unit]
+                        + [fmt_num(st.get(k), comma) for k in ("min", "avg", "max", "std")]
+                        + [fmt_num(st["coverage"], comma) if st.get("coverage") is not None else ""])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def measures_xml(report, meta: dict) -> bytes:
+    raw = report.resolution == "raw"
+    root = ET.Element("MeasurementReport", {
+        "version": "1",
+        "generated": report.generated.astimezone(meta["tz"]).isoformat(timespec="seconds"),
+        "timeZone": meta["time_zone"],
+        "resolution": report.resolution,
+    })
+    params = ET.SubElement(root, "Parameters")
+    ET.SubElement(params, "User").text = meta["user"]
+    ET.SubElement(params, "Server", {"id": str(report.params["node_id"])}).text = meta["server"]
+    ET.SubElement(params, "Period", {
+        "from": report.period[0].isoformat(timespec="seconds"),
+        "to": report.period[1].isoformat(timespec="seconds"),
+    })
+    for s in report.series:
+        el = ET.SubElement(root, "Series", {
+            "objectId": s.object_id, "object": s.object, "stream": s.stream,
+            "analyzerId": str(s.analyzer_id), "analyzer": s.analyzer,
+            "column": s.column, "measure": s.measure, "unit": s.unit,
+        })
+        st = s.stats
+        ET.SubElement(el, "Statistics", {k: fmt_num(st.get(k)) for k in ("min", "avg", "max", "std")}
+                      | {"points": str(st.get("points", 0))}
+                      | ({"coveragePercent": fmt_num(st["coverage"])} if st.get("coverage") is not None else {}))
+        points = ET.SubElement(el, "Points")
+        for p in s.points:
+            if p.avg is None:
+                continue
+            attrs = {"time": p.time.isoformat(timespec="seconds")}
+            attrs |= {"value": fmt_num(p.avg)} if raw else {"min": fmt_num(p.min), "avg": fmt_num(p.avg), "max": fmt_num(p.max)}
+            ET.SubElement(points, "Point", attrs)
+    ET.indent(root)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)

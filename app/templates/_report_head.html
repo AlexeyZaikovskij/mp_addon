@@ -1,0 +1,35 @@
+{# Report header, progress and error state shared by both report types. #}
+<section class="card report-head">
+  <div class="report-title">
+    <h1>{{ report_title }}</h1>
+    <a class="link" href="/">← {{ t("back_to_wizard") }}</a>
+  </div>
+  <dl class="meta">
+    {% if job.params.get("template") %}<div><dt>{{ t("template") }}</dt><dd>{{ job.params.template }}</dd></div>{% endif %}
+    <div><dt>{{ t("server") }}</dt><dd>{{ job.params.get("server", "…") }}</dd></div>
+    <div><dt>{{ t("period") }}</dt><dd>{{ period[0] }} — {{ period[1] }}</dd></div>
+    <div><dt>{{ t("objects") }}</dt><dd>{{ job.params.object_ids | length }}</dd></div>
+    <div><dt>{{ t("user") }}</dt><dd>{{ job.params.user }}</dd></div>
+    {% if extra_meta %}{% for label, value in extra_meta %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}{% endif %}
+    <div><dt>{{ t("time_zone") }}</dt><dd>{{ job.params.time_zone }}</dd></div>
+    {% if report %}<div><dt>{{ t("generated_at") }}</dt><dd>{{ generated }}</dd></div>{% endif %}
+  </dl>
+  {% if report %}
+  <div class="downloads">
+    <span class="muted">{{ t("download") }}:</span>
+    <a class="btn" href="/report/{{ job.id }}/export.csv">CSV</a>
+    <a class="btn" href="/report/{{ job.id }}/export.xml">XML</a>
+    <span class="btn disabled" title="{{ t('pdf_next_stage') }}">PDF</span>
+  </div>
+  {% endif %}
+</section>
+
+{% if job.state == "running" %}
+<section class="card" id="progress" data-job="{{ job.id }}">
+  <p>{{ t("generating") }}</p>
+  <div class="bar"><div class="bar-fill" style="width: {{ job.progress().percent }}%"></div></div>
+  <p class="muted">{{ progress_label }}: <span id="progress-rows">{{ job.rows_fetched }}</span></p>
+</section>
+{% elif job.state == "error" %}
+<section class="card"><div class="error">{{ t("report_failed") }}: {{ job.error }}</div></section>
+{% endif %}

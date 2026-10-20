@@ -242,3 +242,13 @@ button.btn { background: none; cursor: pointer; font: inherit; }
 .btn.primary-btn { background: var(--accent); color: var(--accent-text); }
 .link.danger { color: #a12626; }
 #tpl-message { margin-top: 12px; }
+
+/* Measurement report */
+#charts .chart-card { margin-bottom: 16px; }
+.chart { width: 100%; height: 340px; }
+.chart-sub { font-weight: 400; font-size: 13px; }
+.chart-hint { margin: 0 0 4px; font-size: 12px; }
+h2 em { color: var(--muted); font-style: normal; font-weight: 400; font-size: 13px; }
+tr.group-row td { background: #f6f8fa; font-weight: 600; }
+tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
+#options-card .note { margin-top: 6px; }

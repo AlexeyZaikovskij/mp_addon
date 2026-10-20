@@ -68,4 +68,10 @@ spec: `/swagger/v2/swagger.json`).
 - Without it the server aggregates into `boxPlotDataList[]` (5-min buckets for a 2 h period:
   min / lower quartile / median / average / upper quartile / max) — good for long periods.
 - `POST /api/Measurement/LogData/FindAverages` (same body) → average + standard deviation per measure.
-- `interpolationIntervalType` enum: `seconds`, `minutes`, `hours`, `days`.
+- `interpolationIntervalType` enum: `seconds`, `minutes`, `hours`, `days`. With
+  `{"interpolationIntervalType": "minutes", "interpolationInterval": 5}` the buckets are exactly 5 min
+  (empty buckets come back with `{}` values). 24 h at 1 min = ~1440 buckets per object, answered in well under a second.
+- `availableBoxPlotCount: N` makes the server choose the step itself; `availablePointCount` has no effect.
+- Several objects per request are fine (each gets its own `measurementResponseItemList` entry), also for raw data.
+- `FindAverages` returns `data[]` **without an object id** — only the order tells which object it is,
+  so the add-on calls it once per object.

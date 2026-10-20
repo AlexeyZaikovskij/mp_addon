@@ -336,12 +336,18 @@
       alarm_exclude: alarms ? alarmIdsShown.filter((id) => uncheckedAlarms.has(id)) : [],
       measures: alarms ? {} : measures,
       with_chart: !alarms && $("#with-chart").checked,
+      resolution: alarms ? "auto" : $("#resolution").value,
     };
     if (periodHours) payload.period_hours = periodHours;
     else Object.assign(payload, { period_from: $("#from").value, period_to: $("#to").value });
 
     if (!payload.node_id || !payload.object_ids.length) throw new Error(T.pick_objects_first);
     if (alarms && alarmIdsShown.length && !checkedAlarmIds().length) throw new Error(T.pick_alarms);
+    if (!alarms && !checkedMeasures.size) throw new Error(T.pick_measures);
+    if (!alarms && payload.resolution === "raw") {
+      const hours = periodHours || (new Date(payload.period_to) - new Date(payload.period_from)) / 3600e3;
+      if (hours > 24) throw new Error(T.err_raw_too_long);
+    }
     if (!periodHours && payload.period_to <= payload.period_from) throw new Error(T.err_period);
     return payload;
   }
@@ -357,7 +363,8 @@
     (p.alarm_exclude || []).forEach((id) => uncheckedAlarms.add(id));
     checkedMeasures.clear();
     for (const [aid, cols] of Object.entries(p.measures || {})) cols.forEach((c) => checkedMeasures.add(`${aid}|${c}`));
-    $("#with-chart").checked = !!p.with_chart;
+    $("#with-chart").checked = p.type === "measures" ? !!p.with_chart : true;
+    $("#resolution").value = p.resolution || "auto";
     if (p.period_hours) setPreset(p.period_hours);
     else {
       periodHours = null;
@@ -453,7 +460,6 @@
     const button = $("#generate");
     try {
       const payload = collect();
-      if (payload.type !== "alarms") throw new Error(T.measures_next_stage);
       button.disabled = true;
       const { id } = await api("/api/report", payload);
       location.href = `/report/${id}`;

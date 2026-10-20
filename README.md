@@ -23,6 +23,8 @@ when a file under `app/` changes, and listens on localhost only.
 |---|---|
 | `app/main.py` | Routes: login/logout, wizard page, wizard data API |
 | `app/mp_client.py` | MultiProbe API client |
+| `app/storage.py` | Report templates (SQLite in `data/addon.db`, set `DATA_DIR` to move it) |
+| `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
 | `app/sessions.py` | Server-side sessions (the MP token never reaches the browser) |
 | `app/i18n.py` | EN/RU strings |
 | `app/templates/`, `app/static/` | Pages, styles, wizard script (no CDN — works offline) |
@@ -33,6 +35,7 @@ when a file under `app/` changes, and listens on localhost only.
 
 1. ✅ Skeleton, sign-in through MultiProbe, wizard: report type → server → objects → measures → period → options
 2. ✅ Alarm history report: background generation with progress, summary, table (sort, filter, pages), CSV and XML export
+2a. ✅ Problem time per object (timeline, availability table); report templates (save, share, copy, run in one click)
 3. Measurement report: aggregation, chart
 4. PDF export
 5. Windows service + offline installer

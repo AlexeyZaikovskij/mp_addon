@@ -7,6 +7,7 @@
     <a class="link" href="/">← {{ t("back_to_wizard") }}</a>
   </div>
   <dl class="meta">
+    {% if job.params.get("template") %}<div><dt>{{ t("template") }}</dt><dd>{{ job.params.template }}</dd></div>{% endif %}
     <div><dt>{{ t("server") }}</dt><dd>{{ job.params.get("server", "…") }}</dd></div>
     <div><dt>{{ t("period") }}</dt><dd>{{ period[0] }} — {{ period[1] }}</dd></div>
     <div><dt>{{ t("objects") }}</dt><dd>{{ job.params.object_ids | length }}</dd></div>
@@ -161,5 +162,5 @@
 {% block scripts %}
 <div id="tip" class="tip" hidden></div>
 <script>window.I18N = {{ strings | tojson }};</script>
-<script src="/static/report.js?v={{ static_version }}"></script>
+<script src="/static/report.js?v={{ static_version() }}"></script>
 {% endblock %}

@@ -1,7 +1,6 @@
 """MultiProbe report add-on: web entry point."""
-import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -11,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import i18n, jobs, mp_client, sessions
+from . import i18n, jobs, mp_client, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import export, timeline
@@ -19,6 +18,7 @@ from .reports import export, timeline
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    storage.init()
     yield
     await mp_client.close()
 
@@ -26,8 +26,15 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="MultiProbe Reports", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "app" / "templates")
-# Appended to static URLs so browsers fetch fresh CSS/JS after the add-on is restarted or updated.
-templates.env.globals["static_version"] = str(int(time.time()))
+STATIC_DIR = ROOT / "app" / "static"
+
+
+def _static_version() -> str:
+    """Appended to CSS/JS URLs so browsers fetch fresh files whenever one of them changes."""
+    return str(max(int(f.stat().st_mtime) for f in STATIC_DIR.iterdir() if f.is_file()))
+
+
+templates.env.globals["static_version"] = _static_version
 
 
 class SessionExpired(Exception):
@@ -207,13 +214,15 @@ async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = De
 # --- Report generation ------------------------------------------------------
 
 class ReportRequest(BaseModel):
+    """Everything the wizard collects. A report template stores exactly this."""
     type: Literal["alarms", "measures"]
     node_id: int
     object_ids: list[str] = Field(min_length=1)
-    alarm_ids: list[int] | None = None  # None = every alarm
+    alarm_exclude: list[int] = []  # alarm types the user un-ticked
     measures: dict[int, list[str]] = {}  # analyzerID -> measure column names
-    period_from: datetime  # naive, in the user's MultiProbe time zone
-    period_to: datetime
+    period_hours: int | None = Field(None, gt=0)  # "last N hours", resolved when the report runs
+    period_from: datetime | None = None  # fixed period, naive, in the user's MultiProbe time zone
+    period_to: datetime | None = None
     with_chart: bool = False
 
 
@@ -230,22 +239,29 @@ def _to_utc(value: datetime, tz: ZoneInfo) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-@app.post("/api/report")
-async def api_report_start(req: ReportRequest, session: sessions.Session = Depends(current_session)):
-    tz = _user_tz(session)
+def _period(req: ReportRequest, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    if req.period_hours:
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        return end - timedelta(hours=req.period_hours), end
+    if not req.period_from or not req.period_to:
+        raise HTTPException(422, "Period is not set")
     begin, end = _to_utc(req.period_from, tz), _to_utc(req.period_to, tz)
     if end <= begin:
         raise HTTPException(422, i18n.translator("en")("err_period"))
+    return begin, end
+
+
+def _start_report(req: ReportRequest, session: sessions.Session, template_name: str = "") -> jobs.Job:
     if req.type == "measures":
         raise HTTPException(501, "Measurement reports arrive in the next stage.")
-    if req.alarm_ids is not None and not req.alarm_ids:
-        raise HTTPException(422, "No alarms selected")
-
+    tz = _user_tz(session)
+    begin, end = _period(req, tz)
     params = {
         **req.model_dump(mode="json"),
         "period_utc": [begin.isoformat(), end.isoformat()],
         "time_zone": str(tz),
         "user": session.user_name,
+        "template": template_name,
     }
     token = session.token
 
@@ -254,8 +270,110 @@ async def api_report_start(req: ReportRequest, session: sessions.Session = Depen
         job.params["server"] = next((n["name"] for n in nodes if n["nodeID"] == req.node_id), str(req.node_id))
         return await alarm_report.build(job, token, str(tz))
 
-    job = jobs.start(session.user_id, params, work)
-    return {"id": job.id}
+    return jobs.start(session.user_id, params, work)
+
+
+@app.post("/api/report")
+async def api_report_start(req: ReportRequest, session: sessions.Session = Depends(current_session)):
+    return {"id": _start_report(req, session).id}
+
+
+# --- Report templates -------------------------------------------------------
+
+class TemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    shared: bool = False
+    params: ReportRequest | None = None  # omitted = keep the stored report settings (rename/share only)
+
+
+def _template_out(tpl: dict, session: sessions.Session) -> dict:
+    p = tpl["params"]
+    return {
+        "id": tpl["id"],
+        "name": tpl["name"],
+        "shared": tpl["shared"],
+        "owner": tpl["owner_name"],
+        "mine": tpl["owner_id"] == session.user_id,
+        "updated": tpl["updated"],
+        "params": p,
+        "type": p.get("type"),
+        "objects": len(p.get("object_ids") or []),
+        "period_hours": p.get("period_hours"),
+    }
+
+
+def _template(template_id: int, session: sessions.Session) -> dict:
+    tpl = storage.get_visible(template_id, session.user_id)
+    if tpl is None:
+        raise HTTPException(404, "Template not found")
+    return tpl
+
+
+@app.get("/api/templates")
+async def api_templates(session: sessions.Session = Depends(current_session)):
+    return [_template_out(t, session) for t in storage.list_visible(session.user_id)]
+
+
+@app.get("/api/templates/{template_id}")
+async def api_template(template_id: int, session: sessions.Session = Depends(current_session)):
+    return _template_out(_template(template_id, session), session)
+
+
+@app.post("/api/templates")
+async def api_template_create(body: TemplateIn, session: sessions.Session = Depends(current_session)):
+    if body.params is None:
+        raise HTTPException(422, "Report settings are missing")
+    new_id = storage.create(
+        body.name.strip(), session.user_id, session.user_name, body.shared, body.params.model_dump(mode="json")
+    )
+    return {"id": new_id}
+
+
+@app.put("/api/templates/{template_id}")
+async def api_template_update(template_id: int, body: TemplateIn, session: sessions.Session = Depends(current_session)):
+    params = body.params.model_dump(mode="json") if body.params else None
+    if not storage.update(template_id, session.user_id, body.name.strip(), body.shared, params):
+        raise HTTPException(403, "Only the owner can change this template")
+    return {"id": template_id}
+
+
+class CopyIn(BaseModel):
+    name: str | None = Field(None, max_length=200)
+
+
+@app.post("/api/templates/{template_id}/copy")
+async def api_template_copy(
+    template_id: int, request: Request, body: CopyIn | None = None,
+    session: sessions.Session = Depends(current_session),
+):
+    """Copies always belong to the user who copies; they start private."""
+    tpl = _template(template_id, session)
+    t = i18n.translator(i18n.pick_lang(request))
+    name = (body.name or "").strip() if body else ""
+    new_id = storage.create(
+        name or t("copy_of", name=tpl["name"]), session.user_id, session.user_name, False, tpl["params"]
+    )
+    return {"id": new_id}
+
+
+@app.delete("/api/templates/{template_id}")
+async def api_template_delete(template_id: int, session: sessions.Session = Depends(current_session)):
+    if not storage.delete(template_id, session.user_id):
+        raise HTTPException(403, "Only the owner can delete this template")
+    return {"ok": True}
+
+
+@app.post("/api/templates/{template_id}/run")
+async def api_template_run(template_id: int, session: sessions.Session = Depends(current_session)):
+    tpl = _template(template_id, session)
+    req = ReportRequest.model_validate(tpl["params"])
+    return {"id": _start_report(req, session, tpl["name"]).id}
+
+
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page(request: Request, session: sessions.Session = Depends(current_session)):
+    lang = i18n.pick_lang(request)
+    return render(request, "templates.html", session=session, strings=i18n.bundle(lang))
 
 
 def _job(job_id: str, session: sessions.Session) -> jobs.Job:

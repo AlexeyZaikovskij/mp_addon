@@ -29,6 +29,7 @@ class Settings:
     csv_delimiter: str
     outage_min_priority: int
     degraded_min_priority: int
+    data_dir: Path
 
 
 def load_settings() -> Settings:
@@ -45,6 +46,7 @@ def load_settings() -> Settings:
         default_lang=get("DEFAULT_LANG", "en"),
         outage_min_priority=int(get("OUTAGE_MIN_PRIORITY", "300")),
         degraded_min_priority=int(get("DEGRADED_MIN_PRIORITY", "200")),
+        data_dir=Path(get("DATA_DIR", str(ROOT / "data"))),
         csv_delimiter={"tab": "\t", "comma": ","}.get(get("CSV_DELIMITER", ";"), get("CSV_DELIMITER", ";")),
     )
 

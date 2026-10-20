@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* layout rules (display: flex …) must not un-hide elements */
 body {
   margin: 0;
   font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
@@ -220,3 +221,24 @@ td.depth-1 { --indent: 14px; } td.depth-2 { --indent: 28px; } td.depth-3 { --ind
 .btn.small { padding: 3px 10px; font-size: 12px; }
 td.bad { color: #a12626; font-weight: 600; }
 p.note { font-size: 12px; margin: 10px 0 0; }
+
+/* Navigation and templates */
+.mainnav { display: flex; gap: 14px; }
+.mainnav a { color: #c8d3e6; text-decoration: none; }
+.mainnav a:hover { color: #fff; }
+.template-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tpl-label { font-weight: 600; }
+.template-bar select { min-width: 320px; }
+.tpl-manage { margin-left: auto; }
+.tpl-dialog { flex-basis: 100%; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 4px; }
+.tpl-dialog input[id=tpl-name] { flex: 1 1 280px; }
+.presets button.active { border-color: var(--accent); background: #eef4ff; color: var(--accent); }
+.notice { background: #e8f5e9; color: #1e6b2a; border-radius: 6px; padding: 8px 12px; }
+.tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #e2edff; color: #1d4fa8; font-size: 11px; }
+.tpl-name { font-weight: 600; }
+.actions-cell { white-space: nowrap; display: flex; gap: 12px; align-items: center; }
+.actions-cell .link { font-size: 13px; }
+button.btn { background: none; cursor: pointer; font: inherit; }
+.btn.primary-btn { background: var(--accent); color: var(--accent-text); }
+.link.danger { color: #a12626; }
+#tpl-message { margin-top: 12px; }

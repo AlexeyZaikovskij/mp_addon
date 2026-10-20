@@ -97,7 +97,9 @@ async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
     begin = datetime.fromisoformat(p["period_utc"][0])
     end = datetime.fromisoformat(p["period_utc"][1])
     selected = set(p["object_ids"])
-    alarm_filter = set(p["alarm_ids"]) if p.get("alarm_ids") else None
+    # Alarms the user un-ticked. Storing exclusions (not inclusions) keeps templates working
+    # when new alarm types are added to MultiProbe later.
+    excluded = set(p.get("alarm_exclude") or [])
 
     all_objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(token, p["node_id"])}
     catalog = await mp_client.alarm_catalog(token)
@@ -114,7 +116,7 @@ async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
         for r in items:
             if r.get("monitoringObjectID") not in selected:
                 continue
-            if alarm_filter is not None and r.get("alarmID") not in alarm_filter:
+            if r.get("alarmID") in excluded:
                 continue
             # One event comes back once per view (stream, service, the object itself) and once
             # per window it overlaps; this key identifies the event itself.

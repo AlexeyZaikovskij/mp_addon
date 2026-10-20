@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ t("app_title") }}</title>
-  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version() }}">
 </head>
 <body>
   <header class="topbar">
@@ -16,6 +16,10 @@
         {% endfor %}
       </nav>
       {% if session %}
+        <nav class="mainnav">
+          <a href="/">{{ t("nav_new_report") }}</a>
+          <a href="/templates">{{ t("nav_templates") }}</a>
+        </nav>
         <span class="user" title="{{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</span>
         <form method="post" action="/logout"><button class="link">{{ t("sign_out") }}</button></form>
       {% endif %}

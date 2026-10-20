@@ -16,3 +16,6 @@ docs/swagger.json
 
 # Local tool settings
 .claude/
+
+# Report templates database
+data/

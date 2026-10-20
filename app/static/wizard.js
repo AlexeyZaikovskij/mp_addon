@@ -9,11 +9,11 @@
   const expanded = new Set();  // ids of open tree branches; everything starts collapsed
   const checkedMeasures = new Set(); // "analyzerId|column"
 
-  async function api(path, body) {
-    const resp = await fetch(path, body === undefined ? {} : {
-      method: "POST",
+  async function api(path, body, method = "POST") {
+    const resp = await fetch(path, body === undefined && method === "POST" ? {} : {
+      method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (resp.status === 401) {
       alert(T.err_session);
@@ -38,7 +38,7 @@
       nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
     if (nodes.length === 1) {
       sel.value = nodes[0].id;
-      loadObjects();
+      await loadObjects();
     }
   }
 
@@ -80,9 +80,12 @@
 
     // Collapsed branches are still rendered (just hidden), so ticking a parent also ticks them.
     // While searching, every branch with a match is opened.
-    const renderNode = (o) => {
+    // `hit`: the object itself (or an ancestor) matches the search. Ancestors shown only as
+    // context for a match are not hits, so "Select all" leaves them alone.
+    const renderNode = (o, parentHit = false) => {
       if (!matches(o)) return "";
-      const kids = o.children.map(renderNode).join("");
+      const hit = !query || parentHit || o.name.toLowerCase().includes(query);
+      const kids = o.children.map((c) => renderNode(c, hit)).join("");
       const open = kids && (query || expanded.has(o.id));
       const toggle = kids
         ? `<button type="button" class="twisty" data-toggle="${o.id}" aria-expanded="${open ? "true" : "false"}"></button>`
@@ -91,14 +94,14 @@
         <div class="row">
           ${toggle}
           <label>
-            <input type="checkbox" data-id="${o.id}" ${selected.has(o.id) ? "checked" : ""}>
+            <input type="checkbox" data-id="${o.id}" ${hit ? "data-hit" : ""} ${selected.has(o.id) ? "checked" : ""}>
             <span>${escapeHtml(o.name)}</span><em>${escapeHtml(o.kindName || "")}</em>
           </label>
         </div>
         ${kids ? `<ul ${open ? "" : "hidden"}>${kids}</ul>` : ""}
       </li>`;
     };
-    const html = roots.map(renderNode).join("");
+    const html = roots.map((r) => renderNode(r)).join("");
     $("#obj-tree").innerHTML = html ? `<ul>${html}</ul>` : `<p class="muted">—</p>`;
     updateIndeterminate();
   }
@@ -146,9 +149,9 @@
   $("#obj-collapse").addEventListener("click", () => setAllExpanded(false));
 
   $("#obj-search").addEventListener("input", renderTree);
-  // Select everything currently shown, so "Select all" respects the search filter.
+  // Select what the search found (everything when there is no search).
   $("#obj-all").addEventListener("click", () => {
-    for (const b of $("#obj-tree").querySelectorAll("input[data-id]")) {
+    for (const b of $("#obj-tree").querySelectorAll("input[data-hit]")) {
       b.checked = true;
       selected.add(b.dataset.id);
     }
@@ -288,6 +291,10 @@
 
   // --- Period ---------------------------------------------------------------
   // Values are wall-clock time in the user's MultiProbe time zone, not the browser's.
+  // A preset is remembered as "last N hours", so a template re-runs over a fresh period;
+  // editing the dates by hand makes the period fixed.
+  let periodHours = null;
+
   function inUserTz(date) {
     const s = new Intl.DateTimeFormat("sv-SE", {
       timeZone: window.USER_TZ, year: "numeric", month: "2-digit", day: "2-digit",
@@ -295,50 +302,164 @@
     }).format(date);
     return s.replace(" ", "T");
   }
+  function markPreset(hours) {
+    for (const b of document.querySelectorAll(".presets button")) {
+      b.classList.toggle("active", Number(b.dataset.hours) === hours);
+    }
+  }
   function setPreset(hours) {
     const now = new Date();
     $("#from").value = inUserTz(new Date(now - hours * 3600e3));
     $("#to").value = inUserTz(now);
+    periodHours = hours;
+    markPreset(hours);
   }
   for (const b of document.querySelectorAll(".presets button")) {
     b.addEventListener("click", () => setPreset(Number(b.dataset.hours)));
   }
+  for (const input of [$("#from"), $("#to")]) {
+    input.addEventListener("input", () => { periodHours = null; markPreset(null); });
+  }
 
-  // --- Generate -------------------------------------------------------------
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const result = $("#result");
+  // --- Wizard state <-> request / template ----------------------------------
+  function collect() {
+    const alarms = reportType() === "alarms";
     const measures = {};
     for (const key of checkedMeasures) {
       const [id, column] = key.split("|");
       (measures[id] ||= []).push(column);
     }
-    const alarms = reportType() === "alarms";
-    const chosenAlarms = checkedAlarmIds();
     const payload = {
       type: reportType(),
       node_id: Number($("#node").value),
       object_ids: [...selected],
-      // null = every alarm, so alarms without a definition in the catalogue are not lost
-      alarm_ids: alarms && chosenAlarms.length < alarmIdsShown.length ? chosenAlarms : null,
+      alarm_exclude: alarms ? alarmIdsShown.filter((id) => uncheckedAlarms.has(id)) : [],
       measures: alarms ? {} : measures,
-      period_from: $("#from").value,
-      period_to: $("#to").value,
       with_chart: !alarms && $("#with-chart").checked,
     };
+    if (periodHours) payload.period_hours = periodHours;
+    else Object.assign(payload, { period_from: $("#from").value, period_to: $("#to").value });
+
+    if (!payload.node_id || !payload.object_ids.length) throw new Error(T.pick_objects_first);
+    if (alarms && alarmIdsShown.length && !checkedAlarmIds().length) throw new Error(T.pick_alarms);
+    if (!periodHours && payload.period_to <= payload.period_from) throw new Error(T.err_period);
+    return payload;
+  }
+
+  async function applyTemplate(p) {
+    form.querySelector(`input[name=type][value="${p.type}"]`).checked = true;
+    $("#node").value = String(p.node_id);
+    await loadObjects();
+    const known = new Set(objects.map((o) => o.id));
+    const missing = p.object_ids.filter((id) => !known.has(id)).length;
+    p.object_ids.filter((id) => known.has(id)).forEach((id) => selected.add(id));
+    uncheckedAlarms.clear();
+    (p.alarm_exclude || []).forEach((id) => uncheckedAlarms.add(id));
+    checkedMeasures.clear();
+    for (const [aid, cols] of Object.entries(p.measures || {})) cols.forEach((c) => checkedMeasures.add(`${aid}|${c}`));
+    $("#with-chart").checked = !!p.with_chart;
+    if (p.period_hours) setPreset(p.period_hours);
+    else {
+      periodHours = null;
+      markPreset(null);
+      $("#from").value = p.period_from;
+      $("#to").value = p.period_to;
+    }
+    renderTree();
+    applyType();
+    selectionChanged();
+    return missing;
+  }
+
+  function showMessage(text, isError = false) {
+    const box = $("#result");
+    box.hidden = false;
+    box.innerHTML = `<div class="${isError ? "error" : "notice"}">${escapeHtml(text)}</div>`;
+  }
+
+  // --- Templates ------------------------------------------------------------
+  let templates = [];
+  let current = null; // template loaded into the wizard
+
+  async function loadTemplates(selectId) {
+    templates = await api("/api/templates", undefined, "GET");
+    const mine = templates.filter((t) => t.mine);
+    const shared = templates.filter((t) => !t.mine);
+    const opt = (t) => `<option value="${t.id}">${escapeHtml(t.name)}${t.mine ? "" : ` — ${escapeHtml(t.owner)}`}</option>`;
+    $("#tpl-select").innerHTML = `<option value="">${escapeHtml(T.tpl_none)}</option>` +
+      (mine.length ? `<optgroup label="${escapeHtml(T.tpl_mine)}">${mine.map(opt).join("")}</optgroup>` : "") +
+      (shared.length ? `<optgroup label="${escapeHtml(T.tpl_shared)}">${shared.map(opt).join("")}</optgroup>` : "");
+    $("#tpl-select").value = selectId ? String(selectId) : "";
+    current = templates.find((t) => String(t.id) === String(selectId)) || null;
+    updateTemplateButtons();
+  }
+
+  function updateTemplateButtons() {
+    $("#tpl-save").hidden = !(current && current.mine);
+  }
+
+  async function openTemplate(id) {
+    current = templates.find((t) => String(t.id) === String(id)) || null;
+    updateTemplateButtons();
+    if (!current) return;
+    history.replaceState(null, "", `/?template=${current.id}`);
+    const missing = await applyTemplate(current.params);
+    if (missing) showMessage(T.tpl_missing_objects.replace("{n}", missing), true);
+    else $("#result").hidden = true;
+  }
+
+  $("#tpl-select").addEventListener("change", (e) => {
+    if (e.target.value) openTemplate(e.target.value).catch((err) => showMessage(err.message, true));
+    else { current = null; updateTemplateButtons(); history.replaceState(null, "", "/"); }
+  });
+
+  // Overwrite the loaded template with what the wizard shows now.
+  $("#tpl-save").addEventListener("click", async () => {
+    try {
+      const id = current.id;
+      await api(`/api/templates/${id}`, { name: current.name, shared: current.shared, params: collect() }, "PUT");
+      await loadTemplates(id);
+      showMessage(T.tpl_saved.replace("{name}", current.name));
+    } catch (err) { showMessage(err.message, true); }
+  });
+
+  // "Save as new template": a small inline form instead of a browser prompt.
+  const dialog = $("#tpl-dialog");
+  $("#tpl-save-as").addEventListener("click", () => {
+    dialog.hidden = false;
+    $("#tpl-name").value = current ? T.copy_of.replace("{name}", current.name) : "";
+    $("#tpl-shared").checked = false;
+    $("#tpl-name").focus();
+  });
+  $("#tpl-cancel").addEventListener("click", () => { dialog.hidden = true; });
+  $("#tpl-confirm").addEventListener("click", async () => {
+    const name = $("#tpl-name").value.trim();
+    if (!name) { $("#tpl-name").focus(); return; }
+    try {
+      const { id } = await api("/api/templates", { name, shared: $("#tpl-shared").checked, params: collect() });
+      dialog.hidden = true;
+      await loadTemplates(id);
+      history.replaceState(null, "", `/?template=${id}`);
+      showMessage(T.tpl_saved.replace("{name}", name));
+    } catch (err) { showMessage(err.message, true); }
+  });
+  $("#tpl-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("#tpl-confirm").click(); }
+  });
+
+  // --- Generate -------------------------------------------------------------
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
     const button = $("#generate");
     try {
-      if (!payload.object_ids.length) throw new Error(T.pick_objects_first);
-      if (alarms && alarmIdsShown.length && !chosenAlarms.length) throw new Error(T.pick_alarms);
-      if (!alarms) throw new Error(T.measures_next_stage);
-      if (payload.period_to <= payload.period_from) throw new Error(T.err_period);
+      const payload = collect();
+      if (payload.type !== "alarms") throw new Error(T.measures_next_stage);
       button.disabled = true;
       const { id } = await api("/api/report", payload);
       location.href = `/report/${id}`;
     } catch (err) {
       button.disabled = false;
-      result.hidden = false;
-      result.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+      showMessage(err.message, true);
     }
   });
 
@@ -346,7 +467,16 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  setPreset(24);
-  applyType();
-  loadNodes().catch((err) => { $("#node").innerHTML = `<option>${escapeHtml(err.message)}</option>`; });
+  (async () => {
+    setPreset(24);
+    applyType();
+    try {
+      await loadNodes();
+      const wanted = new URLSearchParams(location.search).get("template");
+      await loadTemplates(wanted);
+      if (wanted) await openTemplate(wanted);
+    } catch (err) {
+      showMessage(err.message, true);
+    }
+  })();
 })();

@@ -1,6 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <form id="wizard" class="wizard" autocomplete="off">
+  <section class="card template-bar">
+    <label for="tpl-select" class="tpl-label">{{ t("template") }}</label>
+    <select id="tpl-select"><option value="">{{ t("loading") }}</option></select>
+    <button type="button" class="link" id="tpl-save" hidden>{{ t("tpl_save") }}</button>
+    <button type="button" class="link" id="tpl-save-as">{{ t("tpl_save_as") }}</button>
+    <a class="link tpl-manage" href="/templates">{{ t("tpl_manage") }}</a>
+    <div class="tpl-dialog" id="tpl-dialog" hidden>
+      <input id="tpl-name" maxlength="200" placeholder="{{ t('tpl_name') }}">
+      <label class="inline"><input type="checkbox" id="tpl-shared"> {{ t("tpl_shared_hint") }}</label>
+      <button type="button" class="primary" id="tpl-confirm">{{ t("tpl_save") }}</button>
+      <button type="button" class="link" id="tpl-cancel">{{ t("cancel") }}</button>
+    </div>
+  </section>
+
   <section class="card">
     <h2><span class="num">1</span>{{ t("step_type") }}</h2>
     <div class="choices">
@@ -75,5 +89,5 @@
 {% endblock %}
 {% block scripts %}
 <script>window.I18N = {{ strings | tojson }}; window.USER_TZ = {{ session.time_zone | tojson }};</script>
-<script src="/static/wizard.js?v={{ static_version }}"></script>
+<script src="/static/wizard.js?v={{ static_version() }}"></script>
 {% endblock %}

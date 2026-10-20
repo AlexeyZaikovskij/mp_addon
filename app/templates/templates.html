@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h1>{{ t("nav_templates") }}</h1>
+    <a class="btn" href="/">+ {{ t("tpl_create") }}</a>
+  </div>
+  <p class="muted">{{ t("tpl_page_hint") }}</p>
+  <div class="toolbar"><input type="search" id="tpl-search" placeholder="{{ t('search') }}"></div>
+  <div class="table-wrap">
+    <table class="grid templates">
+      <thead><tr>
+        <th>{{ t("tpl_name") }}</th>
+        <th>{{ t("step_type") }}</th>
+        <th class="num-cell">{{ t("objects") }}</th>
+        <th>{{ t("period") }}</th>
+        <th>{{ t("tpl_owner") }}</th>
+        <th>{{ t("tpl_updated") }}</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="tpl-rows"><tr><td colspan="7" class="muted">{{ t("loading") }}</td></tr></tbody>
+    </table>
+  </div>
+  <div id="tpl-message" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }}; window.USER_TZ = {{ session.time_zone | tojson }};</script>
+<script src="/static/templates.js?v={{ static_version() }}"></script>
+{% endblock %}

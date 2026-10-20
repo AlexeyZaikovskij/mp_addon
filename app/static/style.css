@@ -315,3 +315,7 @@ tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 .modal-card { width: min(420px, calc(100vw - 32px)); margin: 0; }
 .modal-card label { display: block; margin-bottom: 10px; color: var(--muted); }
 .modal-card input { display: block; width: 100%; margin-top: 4px; }
+
+/* Server switcher in the header */
+.scope { display: flex; align-items: center; gap: 6px; color: #c8d3e6; font-size: 13px; }
+.scope select { min-width: 0; padding: 3px 6px; background: #22304a; color: #fff; border: 1px solid #3a4a66; border-radius: 6px; }

@@ -21,6 +21,7 @@ class Session:
     profile: dict[str, Any]                       # the user's profile on the main server
     conns: dict[int, Conn] = field(default_factory=dict)
     logins: dict[int, str] = field(default_factory=dict)  # server id -> login used there (shown in the UI)
+    scope: int | None = None  # server picked in the header switcher; None = all connected servers
     last_seen: float = field(default_factory=time.monotonic)
 
     @property
@@ -30,6 +31,13 @@ class Session:
     @property
     def token(self) -> str:  # the main server's token
         return self.main.token
+
+    def scoped(self) -> list[Conn]:
+        """Connections the overview and the wizard work with: the picked server, or all of them."""
+        if self.scope is not None and self.scope not in self.conns:
+            self.scope = None  # the picked server was disconnected
+        conns = [self.conns[self.scope]] if self.scope is not None else list(self.conns.values())
+        return sorted(conns, key=lambda c: (c.server_id != MAIN_SERVER, c.name.lower()))
 
     def conn(self, server_id: int) -> Conn:
         c = self.conns.get(server_id)

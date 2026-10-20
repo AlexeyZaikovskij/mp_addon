@@ -74,6 +74,12 @@ STRINGS: dict[str, dict[str, str]] = {
     "ov_open_wizard": {"en": "Open in the report wizard…", "ru": "Открыть в мастере отчётов…"},
     "ov_by_template": {"en": "Run a template for this channel", "ru": "Запустить шаблон для этого канала"},
     "ov_no_templates": {"en": "No templates yet", "ru": "Шаблонов пока нет"},
+    "scope_label": {"en": "Server", "ru": "Сервер"},
+    "scope_all": {"en": "All servers", "ru": "Все серверы"},
+    "scope_hint": {
+        "en": "Which connected server the overview and the report wizard show",
+        "ru": "Какой из подключённых серверов показывают обзор и мастер отчётов",
+    },
     "nav_servers": {"en": "Servers", "ru": "Серверы"},
     "servers_hint": {
         "en": "Nodes of every MultiProbe server you are connected to. Tick several to build one report across them.",

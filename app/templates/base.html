@@ -23,6 +23,25 @@
           <a href="/templates" class="{{ 'active' if path == '/templates' }}">{{ t("nav_templates") }}</a>
           <a href="/servers" class="{{ 'active' if path == '/servers' }}">{{ t("nav_servers") }}</a>
         </nav>
+        {% if session.conns | length > 1 %}
+        <label class="scope" title="{{ t('scope_hint') }}">{{ t("scope_label") }}
+          <select id="scope">
+            <option value="">{{ t("scope_all") }}</option>
+            {% for c in session.conns.values() | sort(attribute="server_id") %}
+            <option value="{{ c.server_id }}" {{ "selected" if session.scope == c.server_id }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <script>
+          document.getElementById("scope").addEventListener("change", async (e) => {
+            const v = e.target.value;
+            await fetch("/api/scope", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ server_id: v === "" ? null : Number(v) }) });
+            // The wizard keeps its own selection; everything else just shows the picked server.
+            location.href = location.pathname.startsWith("/report/") ? "/reports" : location.pathname;
+          });
+        </script>
+        {% endif %}
         <span class="user" title="{{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</span>
         <form method="post" action="/logout"><button class="link">{{ t("sign_out") }}</button></form>
       {% endif %}

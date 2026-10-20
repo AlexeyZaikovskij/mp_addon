@@ -38,8 +38,8 @@
   const reportType = () => form.querySelector("input[name=type]:checked").value;
 
   // --- Step 2: servers ------------------------------------------------------
-  async function loadNodes() {
-    const data = await api("/api/nodes", undefined, "GET");
+  async function loadNodes(all = false) {
+    const data = await api(`/api/nodes${all ? "?all=true" : ""}`, undefined, "GET");
     nodesAll = data.nodes;
     const groups = new Map();
     for (const n of nodesAll) (groups.get(n.server) || groups.set(n.server, []).get(n.server)).push(n);
@@ -429,6 +429,8 @@
     form.querySelector(`input[name=type][value="${p.type}"]`).checked = true;
     // Templates saved before several servers were supported: one node of the main server.
     const targets = p.targets || [{ server_id: 0, node_id: p.node_id, object_ids: p.object_ids || [] }];
+    // A template may use servers other than the one picked in the header: list every connected server then.
+    if (targets.some((t) => !nodesAll.some((n) => n.server_id === t.server_id))) await loadNodes(true);
     checkedNodes.clear();
     for (const t of targets) {
       if (nodesAll.some((n) => n.server_id === t.server_id && n.id === t.node_id)) checkedNodes.add(nodeKey(t.server_id, t.node_id));

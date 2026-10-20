@@ -150,9 +150,11 @@ async def wizard(request: Request, session: sessions.Session = Depends(current_s
 # --- Wizard data ------------------------------------------------------------
 
 @app.get("/api/nodes")
-async def api_nodes(session: sessions.Session = Depends(current_session)):
-    """Probe nodes of every server the user is connected to. A server that fails is reported, not fatal."""
-    conns = sorted(session.conns.values(), key=lambda c: (c.server_id != sessions.MAIN_SERVER, c.name.lower()))
+async def api_nodes(all: bool = False, session: sessions.Session = Depends(current_session)):
+    """Probe nodes of the server picked in the header (or of every connected server with all=true, as a
+    template that spans several servers needs). A server that fails is reported, not fatal."""
+    conns = session.scoped() if not all else sorted(
+        session.conns.values(), key=lambda c: (c.server_id != sessions.MAIN_SERVER, c.name.lower()))
     results = await asyncio.gather(*(mp_client.nodes(c) for c in conns), return_exceptions=True)
     out, errors = [], []
     for c, res in zip(conns, results):
@@ -161,7 +163,7 @@ async def api_nodes(session: sessions.Session = Depends(current_session)):
             continue
         for n in sorted(res, key=lambda n: n["name"]):
             out.append({"server_id": c.server_id, "server": c.name, "id": n["nodeID"], "name": n["name"]})
-    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1}
+    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1 or len(session.conns) > 1}
 
 
 def _is_reportable(obj: dict) -> bool:
@@ -503,14 +505,14 @@ async def overview_page(request: Request, session: sessions.Session = Depends(cu
 
 @app.get("/api/overview/state")
 async def api_overview_state(session: sessions.Session = Depends(current_session)):
-    return await overview.current_state(list(session.conns.values()), _user_tz(session))
+    return await overview.current_state(session.scoped(), _user_tz(session))
 
 
 @app.get("/api/overview/top")
 async def api_overview_top(hours: int = 24, session: sessions.Session = Depends(current_session)):
     if hours not in (1, 24, 168):
         raise HTTPException(422, "hours must be 1, 24 or 168")
-    return await overview.top_channels(list(session.conns.values()), session.user_id, hours, str(_user_tz(session)))
+    return await overview.top_channels(session.scoped(), session.user_id, hours, str(_user_tz(session)))
 
 
 @app.get("/templates", response_class=HTMLResponse)
@@ -919,6 +921,19 @@ async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
     session.conns[server_id] = mp_client.Conn(server_id, srv["name"], srv["url"], token, srv["verify_tls"])
     session.logins[server_id] = body.login
     return {"ok": True}
+
+
+class ScopeIn(BaseModel):
+    server_id: int | None = None  # None = all connected servers
+
+
+@app.post("/api/scope")
+async def api_scope(body: ScopeIn, session: sessions.Session = Depends(current_session)):
+    """The header's server switcher: which server the overview and the wizard show."""
+    if body.server_id is not None:
+        session.conn(body.server_id)  # must be connected
+    session.scope = body.server_id
+    return {"scope": session.scope}
 
 
 @app.post("/api/servers/{server_id}/disconnect")

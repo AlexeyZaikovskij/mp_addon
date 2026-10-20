@@ -183,11 +183,12 @@ class AlarmTypesRequest(BaseModel):
 
 @app.post("/api/alarm-types")
 async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = Depends(current_session)):
-    """Alarm definitions of the selected objects' analyzers, grouped by severity (most severe first)."""
+    """Alarm definitions of the selected objects' analyzers, grouped by severity (most severe first).
+    Every MultiProbe priority group is listed, even when none of its alarms apply to the objects."""
     catalog = await mp_client.alarm_catalog(session.token)
     groups = await mp_client.alarm_groups(session.token)
     wanted = set(req.analyzer_ids)
-    by_group: dict[str, list[dict]] = {}
+    by_group: dict[str, list[dict]] = {g["name"]: [] for g in groups}
     for a in catalog.values():
         if a.get("analyzerID") in wanted:
             by_group.setdefault(a.get("alarmGroupName") or "", []).append(

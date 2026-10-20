@@ -57,7 +57,11 @@ STRINGS: dict[str, dict[str, str]] = {
     "with_chart": {"en": "Add a chart", "ru": "Построить график"},
     "step_alarms": {"en": "Alarms", "ru": "Алармы"},
     "no_alarm_types": {"en": "No alarms are defined for the selected objects.", "ru": "Для выбранных объектов алармы не заданы."},
-    "pick_alarms": {"en": "Select at least one alarm.", "ru": "Выберите хотя бы один аларм."},
+    "group_not_applicable": {
+        "en": "No alarms of this priority for the selected objects",
+        "ru": "Нет алармов этого приоритета для выбранных объектов",
+    },
+    "pick_alarms":{"en": "Select at least one alarm.", "ru": "Выберите хотя бы один аларм."},
     "err_period": {"en": "The end of the period must be after its start.", "ru": "Конец периода должен быть позже начала."},
     "generate": {"en": "Generate report", "ru": "Сформировать отчёт"},
     "measures_next_stage": {

@@ -184,11 +184,15 @@
     if (seq !== alarmsSeq) return;
 
     alarmIdsShown = groups.flatMap((g) => g.alarms.map((a) => a.id));
-    box.innerHTML = groups.length ? groups.map((g) => `
+    box.innerHTML = alarmIdsShown.length ? groups.map((g) => g.alarms.length ? `
       <fieldset class="measure-group">
         <legend><label><input type="checkbox" data-group="1"> ${escapeHtml(g.name)}</label></legend>
         ${g.alarms.map((a) => `<label class="inline"><input type="checkbox" data-alarm="${a.id}" ${uncheckedAlarms.has(a.id) ? "" : "checked"}>
             ${escapeHtml(a.name)} <em>${a.priority}</em></label>`).join("")}
+      </fieldset>` : `
+      <fieldset class="measure-group empty">
+        <legend>${escapeHtml(g.name)}</legend>
+        <span class="muted">${T.group_not_applicable}</span>
       </fieldset>`).join("") : `<p class="muted">${T.no_alarm_types}</p>`;
     syncGroupBoxes($("#alarm-types"), "alarm");
     updateAlarmCount();

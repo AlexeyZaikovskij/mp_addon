@@ -105,6 +105,8 @@ button.twisty[aria-expanded="true"]::before { transform: rotate(90deg); }
 
 .measure-group { border: 1px solid var(--border); border-radius: 6px; margin: 0 0 10px; padding: 6px 12px 10px; }
 .measure-group legend { font-weight: 600; padding: 0 4px; }
+.measure-group.empty legend { color: var(--muted); }
+.measure-group.empty { padding-bottom: 8px; }
 
 .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .presets button { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 5px 10px; }

@@ -118,7 +118,7 @@ def _document(story, title: str, footer: str, t) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=PAGE, leftMargin=MARGIN, rightMargin=MARGIN, topMargin=MARGIN, bottomMargin=MARGIN + 4 * mm,
-        title=title, author="MultiProbe Reports",
+        title=title, author="MultiProbe Toolkit",
     )
     doc.build(story, canvasmaker=_numbered_canvas(footer, t("pdf_page")))
     return buf.getvalue()
@@ -311,7 +311,7 @@ def alarms_pdf(job, report, t, period: list[str], generated: str, max_rows: int,
         story += _tops(s, t)
     if "list" in sections:
         story += _alarm_list(report, t, max_rows)
-    footer = f"MultiProbe Reports · {title} · {period[0]} — {period[1]}"
+    footer = f"MultiProbe Toolkit · {title} · {period[0]} — {period[1]}"
     return _document(story, title, footer, t)
 
 
@@ -417,7 +417,7 @@ def measures_pdf(job, report, t, period: list[str], generated: str, max_series_p
 
     if not report.series:
         story.append(P(t("no_measure_data"), S_BODY))
-        return _document(story, title, f"MultiProbe Reports · {title}", t)
+        return _document(story, title, f"MultiProbe Toolkit · {title}", t)
 
     x0, x1 = report.period
     if "charts" in sections:
@@ -447,7 +447,7 @@ def measures_pdf(job, report, t, period: list[str], generated: str, max_series_p
     if "values" in sections:
         story.append(Paragraph(escape(t("pdf_values_in_csv")), S_NOTE))
 
-    footer = f"MultiProbe Reports · {title} · {period[0]} — {period[1]}"
+    footer = f"MultiProbe Toolkit · {title} · {period[0]} — {period[1]}"
     return _document(story, title, footer, t)
 
 
@@ -548,5 +548,5 @@ def scte_pdf(job, report, t, period: list[str], generated: str, max_rows: int, s
         story.append(_table(data, [w * 0.14, w * 0.08, w * 0.14, w * 0.1, w * 0.08, w * 0.12, w * 0.07,
                                    w * 0.09, w * 0.06, w * 0.12], extra=[("ALIGN", (6, 0), (6, -1), "RIGHT")]))
 
-    footer = f"MultiProbe Reports · {title} · {period[0]} — {period[1]}"
+    footer = f"MultiProbe Toolkit · {title} · {period[0]} — {period[1]}"
     return _document(story, title, footer, t)

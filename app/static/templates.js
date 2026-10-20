@@ -48,7 +48,7 @@
         <td class="nowrap">${escapeHtml(updatedText(t.updated))}</td>
         <td class="actions-cell">
           <button type="button" class="btn small primary-btn" data-act="run">${escapeHtml(T.tpl_run)}</button>
-          <a class="link" href="/?template=${t.id}">${escapeHtml(t.mine ? T.tpl_edit : T.tpl_open)}</a>
+          <a class="link" href="/reports?template=${t.id}">${escapeHtml(t.mine ? T.tpl_edit : T.tpl_open)}</a>
           <button type="button" class="link" data-act="copy">${escapeHtml(T.tpl_copy)}</button>
           ${t.mine ? `<button type="button" class="link" data-act="rename">${escapeHtml(T.tpl_rename)}</button>
             <button type="button" class="link" data-act="share">${escapeHtml(t.shared ? T.tpl_unshare : T.tpl_share)}</button>
@@ -86,7 +86,7 @@
           const name = prompt(T.tpl_copy_name, T.copy_of.replace("{name}", tpl.name));
           if (name === null) return;
           const { id } = await api(`/api/templates/${tpl.id}/copy`, "POST", { name: name.trim() });
-          location.href = `/?template=${id}`;
+          location.href = `/reports?template=${id}`;
           return;
         }
         case "rename": {

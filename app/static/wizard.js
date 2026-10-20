@@ -415,6 +415,28 @@
     return missing;
   }
 
+  // Opened from the overview: tick a channel and everything inside it, open the branches leading to it.
+  async function preselect(nodeId, objectId) {
+    if (nodeId && String(nodeId) !== $("#node").value) {
+      $("#node").value = String(nodeId);
+      await loadObjects();
+    }
+    const children = new Map();
+    for (const o of objects) {
+      if (o.parentId) (children.get(o.parentId) || children.set(o.parentId, []).get(o.parentId)).push(o.id);
+    }
+    const stack = [objectId];
+    while (stack.length) {
+      const id = stack.pop();
+      if (objects.some((o) => o.id === id)) selected.add(id);
+      stack.push(...(children.get(id) || []));
+    }
+    const byId = new Map(objects.map((o) => [o.id, o]));
+    for (let cur = byId.get(objectId); cur && cur.parentId; cur = byId.get(cur.parentId)) expanded.add(cur.parentId);
+    renderTree();
+    selectionChanged();
+  }
+
   function showMessage(text, isError = false) {
     const box = $("#result");
     box.hidden = false;
@@ -446,7 +468,7 @@
     current = templates.find((t) => String(t.id) === String(id)) || null;
     updateTemplateButtons();
     if (!current) return;
-    history.replaceState(null, "", `/?template=${current.id}`);
+    history.replaceState(null, "", `/reports?template=${current.id}`);
     const missing = await applyTemplate(current.params);
     if (missing) showMessage(T.tpl_missing_objects.replace("{n}", missing), true);
     else $("#result").hidden = true;
@@ -454,7 +476,7 @@
 
   $("#tpl-select").addEventListener("change", (e) => {
     if (e.target.value) openTemplate(e.target.value).catch((err) => showMessage(err.message, true));
-    else { current = null; updateTemplateButtons(); history.replaceState(null, "", "/"); }
+    else { current = null; updateTemplateButtons(); history.replaceState(null, "", "/reports"); }
   });
 
   // Overwrite the loaded template with what the wizard shows now.
@@ -483,7 +505,7 @@
       const { id } = await api("/api/templates", { name, shared: $("#tpl-shared").checked, params: collect() });
       dialog.hidden = true;
       await loadTemplates(id);
-      history.replaceState(null, "", `/?template=${id}`);
+      history.replaceState(null, "", `/reports?template=${id}`);
       showMessage(T.tpl_saved.replace("{name}", name));
     } catch (err) { showMessage(err.message, true); }
   });
@@ -515,9 +537,11 @@
     applyType();
     try {
       await loadNodes();
-      const wanted = new URLSearchParams(location.search).get("template");
+      const query = new URLSearchParams(location.search);
+      const wanted = query.get("template");
       await loadTemplates(wanted);
       if (wanted) await openTemplate(wanted);
+      else if (query.get("select")) await preselect(Number(query.get("node")), query.get("select"));
     } catch (err) {
       showMessage(err.message, true);
     }

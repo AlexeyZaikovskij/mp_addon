@@ -2,7 +2,7 @@
 <section class="card report-head">
   <div class="report-title">
     <h1>{{ report_title }}</h1>
-    <a class="link" href="/">← {{ t("back_to_wizard") }}</a>
+    <a class="link" href="/reports">← {{ t("back_to_wizard") }}</a>
   </div>
   <dl class="meta">
     {% if job.params.get("template") %}<div><dt>{{ t("template") }}</dt><dd>{{ job.params.template }}</dd></div>{% endif %}

@@ -1,4 +1,4 @@
-# MultiProbe Reports (mp_addon)
+# MultiProbe Toolkit (mp_addon)
 
 A web page for building alarm-history and measurement reports from MultiProbe.
 Users sign in with their MultiProbe account; the data comes from the MultiProbe REST API.

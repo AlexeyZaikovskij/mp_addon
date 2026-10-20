@@ -17,8 +17,10 @@
       </nav>
       {% if session %}
         <nav class="mainnav">
-          <a href="/">{{ t("nav_new_report") }}</a>
-          <a href="/templates">{{ t("nav_templates") }}</a>
+          {% set path = request.url.path %}
+          <a href="/" class="{{ 'active' if path == '/' }}">{{ t("nav_overview") }}</a>
+          <a href="/reports" class="{{ 'active' if path.startswith('/report') }}">{{ t("nav_reports") }}</a>
+          <a href="/templates" class="{{ 'active' if path == '/templates' }}">{{ t("nav_templates") }}</a>
         </nav>
         <span class="user" title="{{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</span>
         <form method="post" action="/logout"><button class="link">{{ t("sign_out") }}</button></form>

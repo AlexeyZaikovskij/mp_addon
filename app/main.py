@@ -1,4 +1,4 @@
-"""MultiProbe report add-on: web entry point."""
+"""MultiProbe Toolkit: web entry point."""
 from contextlib import asynccontextmanager
 from functools import partial
 from datetime import datetime, timedelta, timezone
@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import i18n, jobs, mp_client, sessions, storage
+from . import i18n, jobs, mp_client, overview, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
     await mp_client.close()
 
 
-app = FastAPI(title="MultiProbe Reports", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="MultiProbe Toolkit", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "app" / "templates")
 STATIC_DIR = ROOT / "app" / "static"
@@ -120,7 +120,7 @@ async def set_lang(code: str, request: Request):
     return response
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/reports", response_class=HTMLResponse)
 async def wizard(request: Request, session: sessions.Session = Depends(current_session)):
     lang = i18n.pick_lang(request)
     return render(request, "wizard.html", session=session, strings=i18n.bundle(lang))
@@ -134,17 +134,8 @@ async def api_nodes(session: sessions.Session = Depends(current_session)):
     return [{"id": n["nodeID"], "name": n["name"]} for n in sorted(items, key=lambda n: n["name"])]
 
 
-# Server hardware and peripherals (GPU, NIC, audio devices, script-fed external devices) are not
-# streams, so they stay out of the report wizard for now.
-_HARDWARE_KINDS = {"device", "deviceConnector", "externalDevice"}
-
-
 def _is_reportable(obj: dict) -> bool:
-    return (
-        obj.get("objectKind") not in _HARDWARE_KINDS
-        and not obj.get("isDisabled")
-        and not str(obj.get("objectType") or "").endswith("Hidden")
-    )
+    return overview.reportable(obj)
 
 
 @app.get("/api/objects")
@@ -316,6 +307,34 @@ async def api_report_start(req: ReportRequest, session: sessions.Session = Depen
     return {"id": _start_report(req, session).id}
 
 
+class ObjectsOverride(BaseModel):
+    """Run a template (or a quick report) for other objects, e.g. a channel clicked on the overview."""
+    node_id: int
+    object_ids: list[str] = Field(min_length=1)
+    expand: bool = True  # also take everything inside these objects, as ticking them in the wizard does
+
+
+async def _expand(session: sessions.Session, o: ObjectsOverride) -> list[str]:
+    if not o.expand:
+        return o.object_ids
+    objects = {x["monitoringObjectID"]: x for x in await mp_client.monitoring_objects(session.token, o.node_id)}
+    ids: list[str] = []
+    for oid in o.object_ids:
+        ids += [i for i in overview.subtree(oid, objects) if i not in ids]
+    if not ids:
+        raise HTTPException(404, "Objects not found")
+    return ids
+
+
+@app.post("/api/report/quick")
+async def api_report_quick(body: ObjectsOverride, kind: Literal["alarms"] = "alarms", hours: int = 24,
+                           session: sessions.Session = Depends(current_session)):
+    """One-click alarm report for a channel: all sections, last `hours`."""
+    req = ReportRequest(type=kind, node_id=body.node_id, object_ids=await _expand(session, body),
+                        period_hours=max(1, min(hours, 24 * 31)))
+    return {"id": _start_report(req, session).id}
+
+
 # --- Report templates -------------------------------------------------------
 
 class TemplateIn(BaseModel):
@@ -402,10 +421,36 @@ async def api_template_delete(template_id: int, session: sessions.Session = Depe
 
 
 @app.post("/api/templates/{template_id}/run")
-async def api_template_run(template_id: int, session: sessions.Session = Depends(current_session)):
+async def api_template_run(template_id: int, body: ObjectsOverride | None = None,
+                           session: sessions.Session = Depends(current_session)):
+    """Run a template as saved, or with its objects replaced (the template's settings, another channel)."""
     tpl = _template(template_id, session)
-    req = ReportRequest.model_validate(tpl["params"])
-    return {"id": _start_report(req, session, tpl["name"]).id}
+    params = dict(tpl["params"])
+    name = tpl["name"]
+    if body is not None:
+        params.update(node_id=body.node_id, object_ids=await _expand(session, body))
+    req = ReportRequest.model_validate(params)
+    return {"id": _start_report(req, session, name).id}
+
+
+# --- Overview -------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+async def overview_page(request: Request, session: sessions.Session = Depends(current_session)):
+    lang = i18n.pick_lang(request)
+    return render(request, "overview.html", session=session, strings=i18n.bundle(lang))
+
+
+@app.get("/api/overview/state")
+async def api_overview_state(session: sessions.Session = Depends(current_session)):
+    return await overview.current_state(session.token, _user_tz(session))
+
+
+@app.get("/api/overview/top")
+async def api_overview_top(hours: int = 24, session: sessions.Session = Depends(current_session)):
+    if hours not in (1, 24, 168):
+        raise HTTPException(422, "hours must be 1, 24 or 168")
+    return await overview.top_channels(session.token, session.user_id, hours, str(_user_tz(session)))
 
 
 @app.get("/templates", response_class=HTMLResponse)

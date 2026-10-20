@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card overview-head">
+  <h1>{{ t("nav_overview") }}</h1>
+  <div class="overview-tools">
+    <span class="muted">{{ t("ov_updated") }}: <b id="updated">—</b></span>
+    <label class="inline"><input type="checkbox" id="auto" checked> {{ t("ov_auto_refresh") }}</label>
+    <button type="button" class="link" id="refresh">{{ t("ov_refresh") }}</button>
+  </div>
+</section>
+
+<div class="ov-grid">
+  <section class="card">
+    <h2>{{ t("ov_state_now") }}</h2>
+    <div class="ov-pie-wrap">
+      <div id="pie" class="ov-pie"></div>
+      <ul class="ov-legend" id="legend"></ul>
+    </div>
+    <p class="muted note">{{ t("ov_state_hint") }}</p>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>{{ t("ov_problems_now") }} <span class="counter" id="now-count"></span></h2>
+      <button type="button" class="link" id="filter-clear" hidden>{{ t("ov_show_all_states") }}</button>
+    </div>
+    <div class="ov-list" id="now-list"><p class="muted">{{ t("loading") }}</p></div>
+  </section>
+</div>
+
+<section class="card" id="streams-card" hidden>
+  <h2>{{ t("ov_stream_problems") }}</h2>
+  <div class="ov-list" id="stream-list"></div>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <h2>{{ t("ov_top") }}</h2>
+    <div class="presets" id="top-period">
+      <button type="button" data-hours="1">{{ t("last_hour") }}</button>
+      <button type="button" data-hours="24" class="active">{{ t("last_24h") }}</button>
+      <button type="button" data-hours="168">{{ t("last_7d") }}</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>#</th><th>{{ t("ov_channel") }}</th><th>{{ t("col_stream") }}</th>
+        <th class="num-cell">{{ t("tl_outage") }}</th><th>{{ t("ov_share") }}</th>
+        <th class="num-cell">{{ t("col_availability") }}</th><th class="num-cell">{{ t("col_incidents") }}</th>
+        <th class="num-cell">{{ t("tl_degraded") }}</th>
+      </tr></thead>
+      <tbody id="top-rows"><tr><td colspan="8" class="muted">{{ t("loading") }}</td></tr></tbody>
+    </table>
+  </div>
+  <p class="muted note" id="top-note"></p>
+</section>
+
+<div class="menu" id="menu" hidden></div>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/overview.js?v={{ static_version() }}"></script>
+{% endblock %}

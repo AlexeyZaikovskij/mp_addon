@@ -75,3 +75,18 @@ spec: `/swagger/v2/swagger.json`).
 - Several objects per request are fine (each gets its own `measurementResponseItemList` entry), also for raw data.
 - `FindAverages` returns `data[]` **without an object id** — only the order tells which object it is,
   so the add-on calls it once per object.
+
+## SCTE-35 markers
+
+- Enabled per stream with a probe preset that has the SCTE-35 decoder and "record SCTE messages to database"
+  (`MpegDecoderPreset.scte35.recordScteMessagesToDatabase`). For HLS MultiProbe then creates a virtual decoder
+  per profile, **"<profile>; PID: 8191; Scte35"**, fed from the playlist tags (`#EXT-X-DATERANGE` / `CUE-OUT`).
+- That decoder carries analyzer **51 "SCTE-35 Analyzer"** (and 286 "SCTE35 Decoder Measurement Verification",
+  `ElapsedTime` = seconds since the last marker).
+- Read the markers with `LogData/Find`, analyzer 51, `forceDisableInterpolation: true`. One raw row per message:
+  `splice_command_type` (5 = splice_insert, 6 = time_signal, 0 = splice_null …) and `SpliceCommand`, the parsed
+  message: `spliceCommandItem.spliceEventId`, `outOfNetworkIndicator`, `breakDuration.duration` (90 kHz ticks,
+  3456000 = 38.4 s), `breakDuration.autoReturn`, `spliceEventCancelIndicator`, `spliceImmediateFlag`,
+  `uniqueProgramId`, `availNum`; plus `spliceDescriptorTypes`, `sapType`, `ptsAdjustment`.
+- The decoder writes one empty row (all values null) when it starts — skip it.
+- Markers are stored with a delay of up to a couple of minutes, and not always on every profile.

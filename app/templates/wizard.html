@@ -26,6 +26,10 @@
         <input type="radio" name="type" value="measures">
         <span><b>{{ t("type_measures") }}</b><small>{{ t("type_measures_hint") }}</small></span>
       </label>
+      <label class="choice">
+        <input type="radio" name="type" value="scte">
+        <span><b>{{ t("type_scte") }}</b><small>{{ t("type_scte_hint") }}</small></span>
+      </label>
     </div>
   </section>
 
@@ -55,6 +59,12 @@
     <div id="alarm-types"><p class="muted">{{ t("pick_objects_first") }}</p></div>
   </section>
 
+  <section class="card" id="scte-card" hidden>
+    <h2><span class="num">4</span>{{ t("step_scte") }}</h2>
+    <p id="scte-found" class="muted">{{ t("pick_objects_first") }}</p>
+    <label class="inline"><input type="checkbox" id="scte-null"> {{ t("scte_include_null") }}</label>
+  </section>
+
   <section class="card" id="measures-card" hidden>
     <h2><span class="num">4</span>{{ t("step_measures") }}
       <span class="counter" id="meas-count"></span></h2>
@@ -81,6 +91,11 @@
     <div class="sections" id="sections-alarms">
       {% for key in ["summary", "timeline", "availability", "top", "list"] %}
       <label class="inline"><input type="checkbox" data-section="{{ key }}" checked> {{ t("sec_alarms_" + key) }}</label>
+      {% endfor %}
+    </div>
+    <div class="sections" id="sections-scte" hidden>
+      {% for key in ["summary", "timeline", "missing", "list"] %}
+      <label class="inline"><input type="checkbox" data-section="{{ key }}" checked> {{ t("sec_scte_" + key) }}</label>
       {% endfor %}
     </div>
     <div class="sections" id="sections-measures" hidden>

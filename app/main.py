@@ -2,6 +2,7 @@
 from contextlib import asynccontextmanager
 from functools import partial
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,6 +17,7 @@ from . import i18n, jobs, mp_client, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
+from .reports import scte as scte_report
 from .reports import export, pdf, timeline
 
 
@@ -219,7 +221,7 @@ async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = De
 
 class ReportRequest(BaseModel):
     """Everything the wizard collects. A report template stores exactly this."""
-    type: Literal["alarms", "measures"]
+    type: Literal["alarms", "measures", "scte"]
     node_id: int
     object_ids: list[str] = Field(min_length=1)
     alarm_exclude: list[int] = []  # alarm types the user un-ticked
@@ -230,11 +232,14 @@ class ReportRequest(BaseModel):
     with_chart: bool = False
     resolution: Literal["auto", "1m", "5m", "15m", "30m", "1h", "3h", "6h", "1d", "raw"] = "auto"
     # Report sections shown on the page and in the PDF; None = all (CSV/XML always hold all data)
-    sections: list[Literal["summary", "timeline", "availability", "top", "list", "charts", "values"]] | None = None
+    sections: list[Literal["summary", "timeline", "availability", "top", "list", "charts", "values", "missing"]] | None = None
+    scte_include_null: bool = False  # SCTE-35: also list splice_null (heartbeat) messages
 
 
 ALARM_SECTIONS = ["summary", "timeline", "availability", "top", "list"]
 MEASURE_SECTIONS = ["charts", "summary", "values"]
+SCTE_SECTIONS = ["summary", "timeline", "missing", "list"]
+SECTIONS = {"alarms": ALARM_SECTIONS, "measures": MEASURE_SECTIONS, "scte": SCTE_SECTIONS}
 
 
 def report_sections(params: dict) -> set[str]:
@@ -242,7 +247,7 @@ def report_sections(params: dict) -> set[str]:
     if sections is None:  # templates saved before sections existed
         if params.get("type") == "measures":
             return {"summary", "values"} | ({"charts"} if params.get("with_chart") else set())
-        return set(ALARM_SECTIONS)
+        return set(SECTIONS.get(params.get("type"), ALARM_SECTIONS))
     return set(sections)
 
 
@@ -275,7 +280,7 @@ def _start_report(req: ReportRequest, session: sessions.Session, template_name: 
     tz = _user_tz(session)
     begin, end = _period(req, tz)
     if req.sections is not None:
-        allowed = MEASURE_SECTIONS if req.type == "measures" else ALARM_SECTIONS
+        allowed = SECTIONS[req.type]
         req.sections = [s for s in req.sections if s in allowed]
         if not req.sections:
             raise HTTPException(422, "No report sections selected")
@@ -299,6 +304,8 @@ def _start_report(req: ReportRequest, session: sessions.Session, template_name: 
         job.params["server"] = next((n["name"] for n in nodes if n["nodeID"] == req.node_id), str(req.node_id))
         if req.type == "measures":
             return await measure_report.build(job, token, str(tz))
+        if req.type == "scte":
+            return await scte_report.build(job, token, str(tz))
         return await alarm_report.build(job, token, str(tz))
 
     return jobs.start(session.user_id, params, work)
@@ -508,6 +515,9 @@ async def report_page(job_id: str, request: Request, session: sessions.Session =
     )
     if measures:
         return render(request, "report_measures.html", **context)
+    if job.params.get("type") == "scte":
+        ticks, rows = (scte_timeline(report, lang) if done else ([], []))
+        return render(request, "report_scte.html", ticks=ticks, timeline=rows, **context)
     ticks, timeline_rows = [], []
     if done:
         # The timeline ends at generation time when the period reaches into the future.
@@ -624,8 +634,8 @@ async def report_export(job_id: str, fmt: str, request: Request, session: sessio
     report = _done(job)
     tz = _user_tz(session)
     stamp = report.generated.astimezone(tz).strftime("%Y%m%d_%H%M")
-    measures = job.params.get("type") == "measures"
-    name = f"{'Measurements' if measures else 'AlarmHistory'}_{stamp}.{fmt}"
+    kind = job.params.get("type") or "alarms"
+    name = f"{ {'alarms': 'AlarmHistory', 'measures': 'Measurements', 'scte': 'SCTE35Markers'}[kind] }_{stamp}.{fmt}"
     meta = {
         "tz": tz,
         "time_zone": str(tz),
@@ -637,20 +647,69 @@ async def report_export(job_id: str, fmt: str, request: Request, session: sessio
     }
     t = i18n.translator(i18n.pick_lang(request))
     if fmt == "csv":
-        body = (export.measures_csv if measures else export.alarms_csv)(report, t, settings.csv_delimiter)
-        return _download(body, "text/csv; charset=utf-8", name)
+        csv_writer = {"alarms": export.alarms_csv, "measures": export.measures_csv, "scte": export.scte_csv}[kind]
+        return _download(csv_writer(report, t, settings.csv_delimiter), "text/csv; charset=utf-8", name)
     if fmt == "xml":
-        body = (export.measures_xml if measures else export.alarms_xml)(report, meta)
-        return _download(body, "application/xml", name)
+        xml_writer = {"alarms": export.alarms_xml, "measures": export.measures_xml, "scte": export.scte_xml}[kind]
+        return _download(xml_writer(report, meta), "application/xml", name)
     if fmt == "pdf":
         period = [export.fmt_dt(p) for p in meta["period"]]
         generated = export.fmt_dt(report.generated.astimezone(tz))
-        if measures:
-            work = partial(pdf.measures_pdf, job, report, t, period, generated, MAX_SERIES_PER_CHART,
-                           report_sections(job.params))
+        sections = report_sections(job.params)
+        if kind == "measures":
+            work = partial(pdf.measures_pdf, job, report, t, period, generated, MAX_SERIES_PER_CHART, sections)
+        elif kind == "scte":
+            work = partial(pdf.scte_pdf, job, report, t, period, generated, settings.pdf_max_rows, sections,
+                           scte_timeline(report, i18n.pick_lang(request)))
         else:
-            work = partial(pdf.alarms_pdf, job, report, t, period, generated, settings.pdf_max_rows,
-                           report_sections(job.params))
+            work = partial(pdf.alarms_pdf, job, report, t, period, generated, settings.pdf_max_rows, sections)
         body = await run_in_threadpool(work)  # a long alarm list takes a few seconds to lay out
         return _download(body, "application/pdf", name)
     raise HTTPException(404, "Unknown format")
+
+
+# --- SCTE-35 report ---------------------------------------------------------------------
+
+def scte_timeline(report, lang: str):
+    """Ad breaks per profile on a timeline: one context row per stream, then its profiles."""
+    t = i18n.translator(lang)
+    begin, end = report.period
+    end = min(end, report.generated.astimezone(begin.tzinfo))
+    total = max((end - begin).total_seconds(), 1)
+    rows, last_stream = [], None
+    for o in report.objects:
+        if o["stream"] != last_stream:
+            last_stream = o["stream"]
+            rows.append(timeline.TimelineRow(SimpleNamespace(name=o["stream"] or "—", depth=0, kind_name=""), [], context=True))
+        bars = []
+        for b in (x for x in report.breaks if x.object_id == o["id"]):
+            left = 100 * (b.begin - begin).total_seconds() / total
+            width = max(100 * (b.end - b.begin).total_seconds() / total, timeline.MIN_WIDTH_PCT)
+            tip = (f"{o['name']}\n{t('scte_break')}: {b.begin:%d.%m %H:%M:%S} – {b.end:%H:%M:%S} "
+                   f"({export.fmt_duration(int((b.end - b.begin).total_seconds()))})"
+                   + (f"\nEvent ID {b.event_id}" if b.event_id is not None else ""))
+            bars.append(timeline.Bar(round(left, 3), round(min(width, 100 - left), 3), "break", tip))
+        rows.append(timeline.TimelineRow(SimpleNamespace(name=o["name"], depth=1, kind_name=""), bars))
+    return timeline._ticks(begin, end), rows
+
+
+@app.get("/api/report/{job_id}/markers")
+async def api_report_markers(
+    job_id: str, request: Request, page: int = 1, size: int = 100, q: str = "", command: str = "", obj: str = "",
+    session: sessions.Session = Depends(current_session),
+):
+    report = _done(_job(job_id, session))
+    t = i18n.translator(i18n.pick_lang(request))
+    rows = [
+        m for m in reversed(report.markers)  # newest first
+        if (not command or m.command == command) and (not obj or m.object_id == obj)
+        and (not q or q.lower() in f"{m.object}\n{m.stream}\n{m.event_id}\n{m.segmentation}".lower())
+    ]
+    size = max(10, min(size, 500))
+    start = (max(page, 1) - 1) * size
+    return {
+        "total": len(rows),
+        "page": max(page, 1),
+        "size": size,
+        "rows": [export.scte_row(m, t) for m in rows[start : start + size]],
+    }

@@ -41,4 +41,5 @@ when a file under `app/` changes, and listens on localhost only.
 3. ✅ Measurement report: server-side aggregation (auto step or 1 min … 1 day, raw up to 24 h), min/avg/max/std,
    coverage, interactive charts (ECharts, zoom synced across charts), CSV/XML export
 4. ✅ PDF export (A4 landscape, bundled DejaVu fonts for Cyrillic, timeline and charts drawn as vectors)
+4a. ✅ SCTE-35 marker report: markers, ad breaks per profile, timeline, markers missing on some profiles; CSV/XML/PDF
 5. Windows service + offline installer

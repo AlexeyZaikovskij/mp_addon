@@ -163,7 +163,24 @@
 
   function selectionChanged() {
     $("#obj-count").textContent = selected.size ? `${T.selected}: ${selected.size}` : "";
-    if (reportType() === "measures") loadMeasures(); else loadAlarmTypes();
+    refreshTypeStep();
+  }
+
+  function refreshTypeStep() {
+    const type = reportType();
+    if (type === "measures") loadMeasures();
+    else if (type === "scte") updateScteFound();
+    else loadAlarmTypes();
+  }
+
+  // SCTE-35: the markers live on decoders with the SCTE-35 analyzer (for HLS a "PID: 8191; Scte35"
+  // per profile). Ticking the stream ticks them too.
+  const SCTE_ANALYZER = 51;
+  function updateScteFound() {
+    const found = objects.filter((o) => selected.has(o.id) && o.analyzers.includes(SCTE_ANALYZER));
+    $("#scte-found").textContent = !selected.size ? T.pick_objects_first
+      : found.length ? T.scte_found.replace("{n}", found.length) : T.scte_none_selected;
+    $("#scte-found").classList.toggle("error", !!selected.size && !found.length);
   }
 
   const selectedAnalyzers = () =>
@@ -281,13 +298,15 @@
 
   // --- Report type toggles the measures step --------------------------------
   function applyType() {
-    const measures = reportType() === "measures";
-    $("#measures-card").hidden = !measures;
-    $("#sections-alarms").hidden = measures;
-    $("#sections-measures").hidden = !measures;
-    $("#measure-options").hidden = !measures;
-    $("#alarms-card").hidden = measures;
-    if (measures) loadMeasures(); else loadAlarmTypes();
+    const type = reportType();
+    $("#alarms-card").hidden = type !== "alarms";
+    $("#measures-card").hidden = type !== "measures";
+    $("#scte-card").hidden = type !== "scte";
+    $("#sections-alarms").hidden = type !== "alarms";
+    $("#sections-measures").hidden = type !== "measures";
+    $("#sections-scte").hidden = type !== "scte";
+    $("#measure-options").hidden = type !== "measures";
+    refreshTypeStep();
   }
   for (const r of form.querySelectorAll("input[name=type]")) r.addEventListener("change", applyType);
 
@@ -325,7 +344,9 @@
 
   // --- Wizard state <-> request / template ----------------------------------
   function collect() {
-    const alarms = reportType() === "alarms";
+    const type = reportType();
+    const alarms = type === "alarms";
+    const isMeasures = type === "measures";
     const measures = {};
     for (const key of checkedMeasures) {
       const [id, column] = key.split("|");
@@ -336,20 +357,24 @@
       node_id: Number($("#node").value),
       object_ids: [...selected],
       alarm_exclude: alarms ? alarmIdsShown.filter((id) => uncheckedAlarms.has(id)) : [],
-      measures: alarms ? {} : measures,
-      resolution: alarms ? "auto" : $("#resolution").value,
+      measures: isMeasures ? measures : {},
+      resolution: isMeasures ? $("#resolution").value : "auto",
+      scte_include_null: type === "scte" && $("#scte-null").checked,
     };
-    const box = alarms ? "#sections-alarms" : "#sections-measures";
+    const box = `#sections-${type}`;
     payload.sections = [...document.querySelectorAll(`${box} input[data-section]:checked`)].map((b) => b.dataset.section);
-    payload.with_chart = !alarms && payload.sections.includes("charts");
+    payload.with_chart = isMeasures && payload.sections.includes("charts");
     if (!payload.sections.length) throw new Error(T.pick_sections);
     if (periodHours) payload.period_hours = periodHours;
     else Object.assign(payload, { period_from: $("#from").value, period_to: $("#to").value });
 
     if (!payload.node_id || !payload.object_ids.length) throw new Error(T.pick_objects_first);
     if (alarms && alarmIdsShown.length && !checkedAlarmIds().length) throw new Error(T.pick_alarms);
-    if (!alarms && !checkedMeasures.size) throw new Error(T.pick_measures);
-    if (!alarms && payload.resolution === "raw") {
+    if (isMeasures && !checkedMeasures.size) throw new Error(T.pick_measures);
+    if (type === "scte" && !objects.some((o) => selected.has(o.id) && o.analyzers.includes(SCTE_ANALYZER))) {
+      throw new Error(T.scte_none_selected);
+    }
+    if (isMeasures && payload.resolution === "raw") {
       const hours = periodHours || (new Date(payload.period_to) - new Date(payload.period_from)) / 3600e3;
       if (hours > 24) throw new Error(T.err_raw_too_long);
     }
@@ -369,10 +394,12 @@
     checkedMeasures.clear();
     for (const [aid, cols] of Object.entries(p.measures || {})) cols.forEach((c) => checkedMeasures.add(`${aid}|${c}`));
     // Templates saved before sections existed: everything on (charts as they were saved).
-    const box = p.type === "measures" ? "#sections-measures" : "#sections-alarms";
-    const wanted = p.sections || (p.type === "measures"
-      ? [...(p.with_chart ? ["charts"] : []), "summary", "values"]
-      : ["summary", "timeline", "availability", "top", "list"]);
+    const box = `#sections-${p.type}`;
+    const wanted = p.sections || {
+      measures: [...(p.with_chart ? ["charts"] : []), "summary", "values"],
+      scte: ["summary", "timeline", "missing", "list"],
+    }[p.type] || ["summary", "timeline", "availability", "top", "list"];
+    $("#scte-null").checked = !!p.scte_include_null;
     for (const b of document.querySelectorAll(`${box} input[data-section]`)) b.checked = wanted.includes(b.dataset.section);
     $("#resolution").value = p.resolution || "auto";
     if (p.period_hours) setPreset(p.period_hours);

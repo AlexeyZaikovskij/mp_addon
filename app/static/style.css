@@ -252,3 +252,10 @@ h2 em { color: var(--muted); font-style: normal; font-weight: 400; font-size: 13
 tr.group-row td { background: #f6f8fa; font-weight: 600; }
 tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 #options-card .note { margin-top: 6px; }
+
+/* SCTE-35 report */
+:root { --break: #2a78d6; }
+.sw.break, .bar.break { background: var(--break); }
+.tl-track.tl-context { background: none; }
+.bad-text { color: #a12626; }
+#scte-found.error { margin-bottom: 8px; }

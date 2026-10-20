@@ -230,3 +230,99 @@ def measures_xml(report, meta: dict) -> bytes:
             ET.SubElement(points, "Point", attrs)
     ET.indent(root)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+# --- SCTE-35 marker report --------------------------------------------------------------
+
+def _yes_no(value, t) -> str:
+    return "" if value is None else (t("yes") if value else t("no"))
+
+
+def scte_row(m, t) -> dict:
+    """One marker as displayed (page table, CSV)."""
+    return {
+        "time": m.time.strftime("%Y-%m-%d %H:%M:%S.") + f"{m.time.microsecond // 1000:03d}",
+        "stream": m.stream,
+        "object": m.object,
+        "command": m.command,
+        "event_id": "" if m.event_id is None else str(m.event_id),
+        "direction": {"out": t("scte_out"), "in": t("scte_in")}.get(m.direction, ""),
+        "duration": "" if m.duration_sec is None else fmt_num(m.duration_sec, False, 3),
+        "auto_return": _yes_no(m.auto_return, t),
+        "cancel": t("yes") if m.cancel else "",
+        "segmentation": m.segmentation,
+    }
+
+
+SCTE_COLUMNS = [("col_time", "time"), ("col_stream", "stream"), ("col_object", "object"),
+                ("col_command", "command"), ("col_event_id", "event_id"), ("col_direction", "direction"),
+                ("col_break_sec", "duration"), ("col_auto_return", "auto_return"), ("col_cancel", "cancel"),
+                ("col_segmentation", "segmentation")]
+
+
+def scte_csv(report, t, delimiter: str) -> bytes:
+    comma = delimiter == ";"
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow([t(key) for key, _ in SCTE_COLUMNS])
+    for m in report.markers:
+        row = scte_row(m, t)
+        if comma:
+            row["duration"] = row["duration"].replace(".", ",")
+        writer.writerow([row[field] for _, field in SCTE_COLUMNS])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def scte_xml(report, meta: dict) -> bytes:
+    """<Scte35Report> with <Summary>, <Missing> markers and the <Markers> themselves."""
+    root = ET.Element("Scte35Report", {
+        "version": "1",
+        "generated": report.generated.astimezone(meta["tz"]).isoformat(timespec="seconds"),
+        "timeZone": meta["time_zone"],
+    })
+    params = ET.SubElement(root, "Parameters")
+    ET.SubElement(params, "User").text = meta["user"]
+    ET.SubElement(params, "Server", {"id": str(report.params["node_id"])}).text = meta["server"]
+    ET.SubElement(params, "Period", {"from": report.period[0].isoformat(timespec="seconds"),
+                                     "to": report.period[1].isoformat(timespec="seconds")})
+    s = report.summary
+    summary = ET.SubElement(root, "Summary", {
+        "markers": str(s["markers"]), "breaks": str(s["breaks"]),
+        "breakTotalSec": fmt_num(s["break_total_sec"]), "missing": str(s["missing"]),
+    })
+    for name, count in s["by_command"]:
+        ET.SubElement(summary, "Command", {"name": name, "count": str(count)})
+    for o in s["per_object"]:
+        ET.SubElement(summary, "Object", {
+            "id": o["id"], "stream": o["stream"], "markers": str(o["markers"]), "breaks": str(o["breaks"]),
+            "breakSec": fmt_num(o["break_sec"]), "missed": str(o["missed"]),
+        }).text = o["name"]
+    missing = ET.SubElement(root, "Missing")
+    for x in report.missing:
+        el = ET.SubElement(missing, "Marker", {
+            "time": x["time"].isoformat(timespec="seconds"), "stream": x["stream"], "command": x["command"],
+            **({"eventId": str(x["event_id"])} if x["event_id"] is not None else {}),
+        })
+        for name in x["missing"]:
+            ET.SubElement(el, "MissingOn").text = name
+    markers = ET.SubElement(root, "Markers")
+    for m in report.markers:
+        attrs = {"time": m.time.isoformat(timespec="milliseconds"), "objectId": m.object_id, "object": m.object,
+                 "stream": m.stream, "command": m.command}
+        if m.command_type is not None:
+            attrs["commandType"] = str(m.command_type)
+        if m.event_id is not None:
+            attrs["eventId"] = str(m.event_id)
+        if m.out_of_network is not None:
+            attrs["outOfNetwork"] = "true" if m.out_of_network else "false"
+        if m.duration_sec is not None:
+            attrs["breakDurationSec"] = fmt_num(m.duration_sec)
+        if m.auto_return is not None:
+            attrs["autoReturn"] = "true" if m.auto_return else "false"
+        if m.cancel:
+            attrs["cancel"] = "true"
+        if m.segmentation:
+            attrs["segmentationTypes"] = m.segmentation
+        ET.SubElement(markers, "Marker", attrs)
+    ET.indent(root)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)

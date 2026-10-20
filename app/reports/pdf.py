@@ -22,7 +22,7 @@ from reportlab.platypus import (
 
 from ..config import ROOT
 from . import timeline
-from .export import fmt_dt, fmt_duration, fmt_num, status_text
+from .export import SCTE_COLUMNS, fmt_dt, fmt_duration, fmt_num, scte_row, status_text
 
 # --- Fonts, colours, styles -------------------------------------------------------
 
@@ -40,6 +40,8 @@ TRACK = colors.HexColor("#eef1f5")
 OUTAGE = colors.HexColor("#d03b3b")
 DEGRADED = colors.HexColor("#fab219")
 BAD = colors.HexColor("#a12626")
+BREAK = colors.HexColor("#2a78d6")
+BAR_COLORS = {"outage": OUTAGE, "degraded": DEGRADED, "break": BREAK}
 PALETTE = [colors.HexColor(c) for c in
            ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")]
 PRIORITY_BG = {
@@ -179,7 +181,7 @@ def timeline_drawing(rows: list, ticks: list, width: float = WIDTH) -> Drawing:
         d.add(Rect(TL_LABEL_W, y + 1.5, plot_w, TL_ROW_H - 3, fillColor=TRACK, strokeColor=None))
         for b in tr.bars:
             d.add(Rect(TL_LABEL_W + plot_w * b.left / 100, y + 2.5, max(plot_w * b.width / 100, 0.8), TL_ROW_H - 5,
-                       fillColor=OUTAGE if b.level == "outage" else DEGRADED, strokeColor=None))
+                       fillColor=BAR_COLORS.get(b.level, DEGRADED), strokeColor=None))
     return d
 
 
@@ -472,3 +474,79 @@ def _measure_summary(report, t) -> list:
                         extra=[("ALIGN", (2, 0), (-1, -1), "RIGHT"), *extra]))
     story.append(Paragraph(escape(t("measure_note")), S_NOTE))
     return story
+
+
+# --- SCTE-35 marker report ------------------------------------------------------------------
+
+def scte_pdf(job, report, t, period: list[str], generated: str, max_rows: int, sections: set[str],
+             timeline_data) -> bytes:
+    title = t("report_scte_title")
+    story = _header(title, _common_meta(job, report, t, period, generated))
+    s = report.summary
+
+    if "summary" in sections:
+        avg_break = fmt_duration(int(s["break_avg_sec"])) if s["break_avg_sec"] is not None else "—"
+        interval = fmt_duration(int(s["interval_avg_sec"])) if s["interval_avg_sec"] is not None else "—"
+        story.append(_tiles([
+            (t("scte_markers"), str(s["markers"])),
+            (t("scte_breaks"), str(s["breaks"])),
+            (t("scte_break_total"), fmt_duration(int(s["break_total_sec"]))),
+            (t("scte_break_avg"), avg_break),
+            (t("scte_interval_avg"), interval),
+            (t("scte_missing"), str(s["missing"])),
+        ]))
+        if s["by_command"]:
+            story.append(Paragraph(escape("   ".join(f"{n}: {c}" for n, c in s["by_command"])), S_NOTE))
+        story.append(Paragraph(escape(t("scte_by_object")), S_H2))
+        head = [t("col_stream"), t("col_object"), t("scte_markers"), t("scte_breaks"), t("scte_break_total"),
+                t("scte_missed"), t("scte_last")]
+        data = [[P(h, S_CELL_B if i < 2 else S_CELL_BR) for i, h in enumerate(head)]]
+        extra = []
+        for o in s["per_object"]:
+            data.append([P(o["stream"]), P(o["name"]), str(o["markers"]), str(o["breaks"]),
+                         fmt_duration(int(o["break_sec"])), str(o["missed"]), fmt_dt(o["last"])])
+            if o["missed"] or not o["markers"]:
+                extra.append(("TEXTCOLOR", (5, len(data) - 1), (5, len(data) - 1), BAD))
+        w = WIDTH
+        story.append(_table(data, [w * 0.16, w * 0.24, w * 0.1, w * 0.1, w * 0.13, w * 0.11, w * 0.16],
+                            extra=[("ALIGN", (2, 0), (-1, -1), "RIGHT"), *extra]))
+
+    if "timeline" in sections:
+        ticks, rows = timeline_data
+        story.append(Paragraph(escape(t("scte_timeline")), S_H2))
+        story.append(_legend([(BREAK, t("scte_break"))]))
+        for i in range(0, len(rows), TL_ROWS_PER_BLOCK):
+            story.append(timeline_drawing(rows[i:i + TL_ROWS_PER_BLOCK], ticks))
+
+    if "missing" in sections:
+        story.append(Paragraph(escape(t("scte_missing_title")), S_H2))
+        if report.missing:
+            head = [t("col_time"), t("col_stream"), t("col_command"), t("col_event_id"), t("scte_received"), t("scte_missing_on")]
+            data = [[P(h, S_CELL_B) for h in head]]
+            for x in report.missing[:max_rows]:
+                data.append([fmt_dt(x["time"]), P(x["stream"]), x["command"], str(x["event_id"] or ""),
+                             P(", ".join(x["received"])), P(", ".join(x["missing"]))])
+            w = WIDTH
+            story.append(_table(data, [w * 0.13, w * 0.12, w * 0.11, w * 0.1, w * 0.27, w * 0.27],
+                                extra=[("TEXTCOLOR", (5, 1), (5, -1), BAD)]))
+        else:
+            story.append(P(t("scte_no_missing"), S_BODY))
+
+    if "list" in sections:
+        story.append(Paragraph(escape(t("scte_list")), S_H2))
+        shown = list(reversed(report.markers))[:max_rows]
+        if len(report.markers) > len(shown):
+            story.append(Paragraph(escape(t("pdf_markers_limited").replace("{n}", str(len(shown)))
+                                          .replace("{total}", str(len(report.markers)))), S_NOTE))
+        data = [[P(t(key), S_CELL_B) for key, _ in SCTE_COLUMNS]]
+        for m in shown:
+            row = scte_row(m, t)
+            data.append([row["time"], P(row["stream"]), P(row["object"]), row["command"], row["event_id"],
+                         P(row["direction"]), row["duration"], row["auto_return"], row["cancel"],
+                         P(row["segmentation"])])
+        w = WIDTH
+        story.append(_table(data, [w * 0.14, w * 0.08, w * 0.14, w * 0.1, w * 0.08, w * 0.12, w * 0.07,
+                                   w * 0.09, w * 0.06, w * 0.12], extra=[("ALIGN", (6, 0), (6, -1), "RIGHT")]))
+
+    footer = f"MultiProbe Reports · {title} · {period[0]} — {period[1]}"
+    return _document(story, title, footer, t)

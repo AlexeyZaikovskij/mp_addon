@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{% set report_title = t("report_scte_title") %}
+{% set progress_label = t("scte_markers") %}
+{% include "_report_head.html" %}
+{% if job.state == "done" %}
+{% set s = report.summary %}
+
+{% if not report.objects %}
+<section class="card"><p class="muted">{{ t("scte_no_objects") }}</p></section>
+{% else %}
+
+{% if "summary" in sections %}
+<section class="stats">
+  <div class="stat"><span>{{ t("scte_markers") }}</span><b>{{ s.markers }}</b></div>
+  <div class="stat"><span>{{ t("scte_breaks") }}</span><b>{{ s.breaks }}</b></div>
+  <div class="stat"><span>{{ t("scte_break_total") }}</span><b>{{ fmt_duration(s.break_total_sec | int) }}</b></div>
+  <div class="stat"><span>{{ t("scte_break_avg") }}</span><b>{{ fmt_duration(s.break_avg_sec | int) if s.break_avg_sec is not none else "—" }}</b></div>
+  <div class="stat"><span>{{ t("scte_interval_avg") }}</span><b>{{ fmt_duration(s.interval_avg_sec | int) if s.interval_avg_sec is not none else "—" }}</b></div>
+  <div class="stat"><span>{{ t("scte_missing") }}</span><b class="{{ 'bad-text' if s.missing }}">{{ s.missing }}</b></div>
+  {% if s.by_command %}
+  <div class="stat groups">
+    {% for name, count in s.by_command %}<span class="prio prio-advisory">{{ name }} <b>{{ count }}</b></span>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>{{ t("scte_by_object") }}</h2>
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>{{ t("col_stream") }}</th><th>{{ t("col_object") }}</th>
+        <th class="num-cell">{{ t("scte_markers") }}</th><th class="num-cell">{{ t("scte_breaks") }}</th>
+        <th class="num-cell">{{ t("scte_break_total") }}</th><th class="num-cell">{{ t("scte_missed") }}</th>
+        <th>{{ t("scte_last") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for o in s.per_object %}
+        <tr>
+          <td>{{ o.stream }}</td><td>{{ o.name }}</td>
+          <td class="num-cell">{{ o.markers }}</td><td class="num-cell">{{ o.breaks }}</td>
+          <td class="num-cell">{{ fmt_duration(o.break_sec | int) }}</td>
+          <td class="num-cell{{ ' bad' if o.missed }}">{{ o.missed }}</td>
+          <td class="nowrap">{{ o.last.strftime("%Y-%m-%d %H:%M:%S") if o.last else "—" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if "timeline" in sections %}
+<section class="card" id="timeline">
+  <div class="section-head">
+    <h2>{{ t("scte_timeline") }}</h2>
+    <div class="legend"><span><i class="sw break"></i>{{ t("scte_break") }}</span></div>
+  </div>
+  <div class="tl">
+    <div class="tl-row tl-axis">
+      <div class="tl-label"></div>
+      <div class="tl-track">{% for tick in ticks %}<span class="tick" style="left: {{ tick.pct }}%">{{ tick.label }}</span>{% endfor %}</div>
+    </div>
+    {% for tr in timeline %}
+    <div class="tl-row">
+      <div class="tl-label depth-{{ tr.row.depth }}" title="{{ tr.row.name }}">{{ tr.row.name }}</div>
+      <div class="tl-track{{ ' tl-context' if tr.context }}">
+        {% for tick in ticks %}<i class="tl-grid" style="left: {{ tick.pct }}%"></i>{% endfor %}
+        {% for b in tr.bars %}<span class="bar {{ b.level }}" style="left: {{ b.left }}%; width: {{ b.width }}%" data-tip="{{ b.tip }}"></span>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if "missing" in sections %}
+<section class="card">
+  <h2>{{ t("scte_missing_title") }}</h2>
+  {% if report.missing %}
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>{{ t("col_time") }}</th><th>{{ t("col_stream") }}</th><th>{{ t("col_command") }}</th>
+        <th>{{ t("col_event_id") }}</th><th>{{ t("scte_received") }}</th><th>{{ t("scte_missing_on") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for x in report.missing[:500] %}
+        <tr>
+          <td class="nowrap">{{ x.time.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ x.stream }}</td><td>{{ x.command }}</td>
+          <td>{{ x.event_id if x.event_id is not none else "" }}</td>
+          <td>{{ x.received | join(", ") }}</td><td class="bad">{{ x.missing | join(", ") }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">{{ t("scte_no_missing") }}</p>
+  {% endif %}
+  <p class="muted note">{{ t("scte_missing_note") }}</p>
+</section>
+{% endif %}
+
+{% if "list" in sections %}
+<section class="card" id="markers-card" data-job="{{ job.id }}">
+  <h2>{{ t("scte_list") }}</h2>
+  <div class="toolbar">
+    <input type="search" id="q" placeholder="{{ t('search') }}">
+    <select id="obj">
+      <option value="">{{ t("all_objects") }}</option>
+      {% for o in report.objects %}<option value="{{ o.id }}">{{ o.stream }} — {{ o.name }}</option>{% endfor %}
+    </select>
+    <select id="command">
+      <option value="">{{ t("scte_all_commands") }}</option>
+      {% for name, count in s.by_command %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>{{ t("col_time") }}</th><th>{{ t("col_stream") }}</th><th>{{ t("col_object") }}</th>
+        <th>{{ t("col_command") }}</th><th>{{ t("col_event_id") }}</th><th>{{ t("col_direction") }}</th>
+        <th class="num-cell">{{ t("col_break_sec") }}</th><th>{{ t("col_auto_return") }}</th>
+        <th>{{ t("col_cancel") }}</th><th>{{ t("col_segmentation") }}</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span id="page-info" class="muted"></span>
+    <button type="button" id="prev">{{ t("prev") }}</button>
+    <button type="button" id="next">{{ t("next") }}</button>
+  </div>
+</section>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<div id="tip" class="tip" hidden></div>
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/report.js?v={{ static_version() }}"></script>
+{% if report and "list" in sections %}<script src="/static/scte.js?v={{ static_version() }}"></script>{% endif %}
+{% endblock %}

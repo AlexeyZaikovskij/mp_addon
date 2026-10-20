@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<form id="wizard" class="wizard" autocomplete="off">
+  <section class="card">
+    <h2><span class="num">1</span>{{ t("step_type") }}</h2>
+    <div class="choices">
+      <label class="choice">
+        <input type="radio" name="type" value="alarms" checked>
+        <span><b>{{ t("type_alarms") }}</b><small>{{ t("type_alarms_hint") }}</small></span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="type" value="measures">
+        <span><b>{{ t("type_measures") }}</b><small>{{ t("type_measures_hint") }}</small></span>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>{{ t("step_server") }}</h2>
+    <select id="node" required>
+      <option value="">{{ t("loading") }}</option>
+    </select>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>{{ t("step_objects") }}
+      <span class="counter" id="obj-count"></span></h2>
+    <div class="toolbar">
+      <input type="search" id="obj-search" placeholder="{{ t('search') }}">
+      <button type="button" class="link" id="obj-expand">{{ t("expand_all") }}</button>
+      <button type="button" class="link" id="obj-collapse">{{ t("collapse_all") }}</button>
+      <button type="button" class="link" id="obj-all">{{ t("select_all") }}</button>
+      <button type="button" class="link" id="obj-clear">{{ t("clear") }}</button>
+    </div>
+    <div class="tree" id="obj-tree"><p class="muted">{{ t("select_server") }}</p></div>
+  </section>
+
+  <section class="card" id="alarms-card">
+    <h2><span class="num">4</span>{{ t("step_alarms") }}
+      <span class="counter" id="alarm-count"></span></h2>
+    <div id="alarm-types"><p class="muted">{{ t("pick_objects_first") }}</p></div>
+  </section>
+
+  <section class="card" id="measures-card" hidden>
+    <h2><span class="num">4</span>{{ t("step_measures") }}
+      <span class="counter" id="meas-count"></span></h2>
+    <div id="measures"><p class="muted">{{ t("pick_objects_first") }}</p></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>{{ t("step_period") }}</h2>
+    <div class="presets">
+      <button type="button" data-hours="1">{{ t("last_hour") }}</button>
+      <button type="button" data-hours="24">{{ t("last_24h") }}</button>
+      <button type="button" data-hours="168">{{ t("last_7d") }}</button>
+      <button type="button" data-hours="720">{{ t("last_30d") }}</button>
+    </div>
+    <div class="period">
+      <label>{{ t("period_from") }} <input type="datetime-local" id="from" step="1" required></label>
+      <label>{{ t("period_to") }} <input type="datetime-local" id="to" step="1" required></label>
+      <span class="muted">{{ t("time_zone") }}: {{ session.time_zone }}</span>
+    </div>
+  </section>
+
+  <section class="card" id="options-card" hidden>
+    <h2><span class="num">6</span>{{ t("step_options") }}</h2>
+    <label class="inline"><input type="checkbox" id="with-chart"> {{ t("with_chart") }}</label>
+  </section>
+
+  <div class="actions">
+    <button class="primary" id="generate">{{ t("generate") }}</button>
+  </div>
+  <section class="card" id="result" hidden></section>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }}; window.USER_TZ = {{ session.time_zone | tojson }};</script>
+<script src="/static/wizard.js"></script>
+{% endblock %}

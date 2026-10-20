@@ -1,0 +1,18 @@
+# Local secrets and settings
+*.env
+!config.example.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Generated reports
+output/
+
+# MultiProbe API spec — kept local (the repository is public)
+docs/swagger.json
+
+# Local tool settings
+.claude/

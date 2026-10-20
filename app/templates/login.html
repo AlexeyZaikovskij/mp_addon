@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card login-card">
+  <h1>{{ t("login_title") }}</h1>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label>{{ t("login") }}
+      <input name="login" value="{{ login_name }}" autocomplete="username" required autofocus>
+    </label>
+    <label>{{ t("password") }}
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button class="primary">{{ t("sign_in") }}</button>
+  </form>
+</section>
+{% endblock %}

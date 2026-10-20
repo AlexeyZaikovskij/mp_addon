@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t("app_title") }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">{{ t("app_title") }}</div>
+    <div class="topbar-right">
+      <nav class="lang">
+        {% for code in ["en", "ru"] %}
+          <a href="/lang/{{ code }}" class="{{ 'active' if code == lang }}">{{ code | upper }}</a>
+        {% endfor %}
+      </nav>
+      {% if session %}
+        <span class="user" title="{{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</span>
+        <form method="post" action="/logout"><button class="link">{{ t("sign_out") }}</button></form>
+      {% endif %}
+    </div>
+  </header>
+  <main class="{% block main_class %}{% endblock %}">{% block content %}{% endblock %}</main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

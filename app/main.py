@@ -1,10 +1,12 @@
 """MultiProbe report add-on: web entry point."""
 from contextlib import asynccontextmanager
+from functools import partial
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -14,7 +16,7 @@ from . import i18n, jobs, mp_client, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
-from .reports import export, timeline
+from .reports import export, pdf, timeline
 
 
 @asynccontextmanager
@@ -227,6 +229,21 @@ class ReportRequest(BaseModel):
     period_to: datetime | None = None
     with_chart: bool = False
     resolution: Literal["auto", "1m", "5m", "15m", "30m", "1h", "3h", "6h", "1d", "raw"] = "auto"
+    # Report sections shown on the page and in the PDF; None = all (CSV/XML always hold all data)
+    sections: list[Literal["summary", "timeline", "availability", "top", "list", "charts", "values"]] | None = None
+
+
+ALARM_SECTIONS = ["summary", "timeline", "availability", "top", "list"]
+MEASURE_SECTIONS = ["charts", "summary", "values"]
+
+
+def report_sections(params: dict) -> set[str]:
+    sections = params.get("sections")
+    if sections is None:  # templates saved before sections existed
+        if params.get("type") == "measures":
+            return {"summary", "values"} | ({"charts"} if params.get("with_chart") else set())
+        return set(ALARM_SECTIONS)
+    return set(sections)
 
 
 def _user_tz(session: sessions.Session) -> ZoneInfo:
@@ -257,6 +274,12 @@ def _period(req: ReportRequest, tz: ZoneInfo) -> tuple[datetime, datetime]:
 def _start_report(req: ReportRequest, session: sessions.Session, template_name: str = "") -> jobs.Job:
     tz = _user_tz(session)
     begin, end = _period(req, tz)
+    if req.sections is not None:
+        allowed = MEASURE_SECTIONS if req.type == "measures" else ALARM_SECTIONS
+        req.sections = [s for s in req.sections if s in allowed]
+        if not req.sections:
+            raise HTTPException(422, "No report sections selected")
+        req.with_chart = req.type == "measures" and "charts" in req.sections
     if req.type == "measures":
         if not any(req.measures.values()):
             raise HTTPException(422, "No measures selected")
@@ -481,6 +504,7 @@ async def report_page(job_id: str, request: Request, session: sessions.Session =
         fmt_num=export.fmt_num,
         generated=export.fmt_dt(report.generated.astimezone(tz)) if done else "",
         strings=i18n.bundle(lang),
+        sections=report_sections(job.params),
     )
     if measures:
         return render(request, "report_measures.html", **context)
@@ -618,4 +642,15 @@ async def report_export(job_id: str, fmt: str, request: Request, session: sessio
     if fmt == "xml":
         body = (export.measures_xml if measures else export.alarms_xml)(report, meta)
         return _download(body, "application/xml", name)
+    if fmt == "pdf":
+        period = [export.fmt_dt(p) for p in meta["period"]]
+        generated = export.fmt_dt(report.generated.astimezone(tz))
+        if measures:
+            work = partial(pdf.measures_pdf, job, report, t, period, generated, MAX_SERIES_PER_CHART,
+                           report_sections(job.params))
+        else:
+            work = partial(pdf.alarms_pdf, job, report, t, period, generated, settings.pdf_max_rows,
+                           report_sections(job.params))
+        body = await run_in_threadpool(work)  # a long alarm list takes a few seconds to lay out
+        return _download(body, "application/pdf", name)
     raise HTTPException(404, "Unknown format")

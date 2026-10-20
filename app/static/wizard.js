@@ -283,7 +283,9 @@
   function applyType() {
     const measures = reportType() === "measures";
     $("#measures-card").hidden = !measures;
-    $("#options-card").hidden = !measures;
+    $("#sections-alarms").hidden = measures;
+    $("#sections-measures").hidden = !measures;
+    $("#measure-options").hidden = !measures;
     $("#alarms-card").hidden = measures;
     if (measures) loadMeasures(); else loadAlarmTypes();
   }
@@ -335,9 +337,12 @@
       object_ids: [...selected],
       alarm_exclude: alarms ? alarmIdsShown.filter((id) => uncheckedAlarms.has(id)) : [],
       measures: alarms ? {} : measures,
-      with_chart: !alarms && $("#with-chart").checked,
       resolution: alarms ? "auto" : $("#resolution").value,
     };
+    const box = alarms ? "#sections-alarms" : "#sections-measures";
+    payload.sections = [...document.querySelectorAll(`${box} input[data-section]:checked`)].map((b) => b.dataset.section);
+    payload.with_chart = !alarms && payload.sections.includes("charts");
+    if (!payload.sections.length) throw new Error(T.pick_sections);
     if (periodHours) payload.period_hours = periodHours;
     else Object.assign(payload, { period_from: $("#from").value, period_to: $("#to").value });
 
@@ -363,7 +368,12 @@
     (p.alarm_exclude || []).forEach((id) => uncheckedAlarms.add(id));
     checkedMeasures.clear();
     for (const [aid, cols] of Object.entries(p.measures || {})) cols.forEach((c) => checkedMeasures.add(`${aid}|${c}`));
-    $("#with-chart").checked = p.type === "measures" ? !!p.with_chart : true;
+    // Templates saved before sections existed: everything on (charts as they were saved).
+    const box = p.type === "measures" ? "#sections-measures" : "#sections-alarms";
+    const wanted = p.sections || (p.type === "measures"
+      ? [...(p.with_chart ? ["charts"] : []), "summary", "values"]
+      : ["summary", "timeline", "availability", "top", "list"]);
+    for (const b of document.querySelectorAll(`${box} input[data-section]`)) b.checked = wanted.includes(b.dataset.section);
     $("#resolution").value = p.resolution || "auto";
     if (p.period_hours) setPreset(p.period_hours);
     else {

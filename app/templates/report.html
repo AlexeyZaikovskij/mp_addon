@@ -6,6 +6,7 @@
 {% include "_report_head.html" %}
 {% if job.state == "done" %}
 {% set s = report.summary %}
+{% if "summary" in sections %}
 <section class="stats">
   <div class="stat"><span>{{ t("sum_total") }}</span><b>{{ s.total }}</b></div>
   <div class="stat"><span>{{ t("sum_active") }}</span><b>{{ s.active }}</b></div>
@@ -21,7 +22,9 @@
     {% endfor %}
   </div>
 </section>
+{% endif %}
 
+{% if "timeline" in sections %}
 <section class="card" id="timeline">
   <div class="section-head">
     <h2>{{ t("timeline") }}</h2>
@@ -37,7 +40,7 @@
       <div class="tl-track">{% for tick in ticks %}<span class="tick" style="left: {{ tick.pct }}%">{{ tick.label }}</span>{% endfor %}</div>
     </div>
     {% for tr in timeline %}
-    <div class="tl-row{{ ' ok' if not tr.bars }}" >
+    <div class="tl-row{{ ' ok' if not tr.shown_when_filtered }}" >
       <div class="tl-label depth-{{ [tr.row.depth, 3] | min }}" title="{{ tr.row.name }} — {{ tr.row.kind_name }}">{{ tr.row.name }}</div>
       <div class="tl-track">
         {% for tick in ticks %}<i class="tl-grid" style="left: {{ tick.pct }}%"></i>{% endfor %}
@@ -48,8 +51,9 @@
     <p class="muted tl-empty" hidden>{{ t("no_problems") }}</p>
   </div>
 </section>
+{% endif %}
 
-{% if s.total %}
+{% if s.total and "top" in sections %}
 <section class="tops">
   <div class="card">
     <h2>{{ t("top_alarms") }}</h2>
@@ -62,6 +66,7 @@
 </section>
 {% endif %}
 
+{% if "list" in sections %}
 <section class="card" id="table-card" data-job="{{ job.id }}">
   <div class="toolbar">
     <input type="search" id="q" placeholder="{{ t('search') }}">
@@ -96,7 +101,9 @@
     <button type="button" id="next">{{ t("next") }}</button>
   </div>
 </section>
+{% endif %}
 
+{% if "availability" in sections %}
 <section class="card" id="availability">
   <div class="section-head">
     <h2>{{ t("availability_title") }}</h2>
@@ -128,6 +135,7 @@
   </div>
   <p class="muted note">{{ t("availability_note") }}</p>
 </section>
+{% endif %}
 {% endif %}
 {% endblock %}
 {% block scripts %}

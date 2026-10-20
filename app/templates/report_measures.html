@@ -11,12 +11,13 @@
 <section class="card"><p class="muted">{{ t("no_measure_data") }}</p></section>
 {% else %}
 
-{% if job.params.with_chart %}
+{% if "charts" in sections %}
 <section id="charts" data-job="{{ job.id }}">
   <p class="muted">{{ t("loading") }}</p>
 </section>
 {% endif %}
 
+{% if "summary" in sections %}
 <section class="card" id="summary">
   <div class="section-head">
     <h2>{{ t("measure_summary") }}</h2>
@@ -56,7 +57,9 @@
   </div>
   <p class="muted note">{{ t("measure_note") }}</p>
 </section>
+{% endif %}
 
+{% if "values" in sections %}
 <section class="card" id="points-card" data-job="{{ job.id }}">
   <h2>{{ t("measure_values") }}</h2>
   <div class="toolbar">
@@ -92,6 +95,7 @@
 </section>
 {% endif %}
 {% endif %}
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <div id="tip" class="tip" hidden></div>
@@ -99,7 +103,7 @@
 {% if job.state == "running" %}
 <script src="/static/report.js?v={{ static_version() }}"></script>
 {% elif report and report.series %}
-{% if job.params.with_chart %}<script src="/static/vendor/echarts.min.js"></script>{% endif %}
+{% if "charts" in sections %}<script src="/static/vendor/echarts.min.js"></script>{% endif %}
 <script src="/static/measures.js?v={{ static_version() }}"></script>
 {% endif %}
 {% endblock %}

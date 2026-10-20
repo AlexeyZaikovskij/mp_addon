@@ -76,9 +76,20 @@
     </div>
   </section>
 
-  <section class="card" id="options-card" hidden>
-    <h2><span class="num">6</span>{{ t("step_options") }}</h2>
-    <label class="inline"><input type="checkbox" id="with-chart" checked> {{ t("with_chart") }}</label>
+  <section class="card" id="options-card">
+    <h2><span class="num">6</span>{{ t("step_content") }}</h2>
+    <div class="sections" id="sections-alarms">
+      {% for key in ["summary", "timeline", "availability", "top", "list"] %}
+      <label class="inline"><input type="checkbox" data-section="{{ key }}" checked> {{ t("sec_alarms_" + key) }}</label>
+      {% endfor %}
+    </div>
+    <div class="sections" id="sections-measures" hidden>
+      {% for key in ["charts", "summary", "values"] %}
+      <label class="inline"><input type="checkbox" data-section="{{ key }}" checked> {{ t("sec_measures_" + key) }}</label>
+      {% endfor %}
+    </div>
+    <p class="muted note">{{ t("sections_hint") }}</p>
+    <div id="measure-options" hidden>
     <label class="inline">{{ t("resolution") }}
       <select id="resolution">
         <option value="auto">{{ t("res_auto") }}</option>
@@ -87,6 +98,7 @@
       </select>
     </label>
     <p class="muted note">{{ t("resolution_hint") }}</p>
+    </div>
   </section>
 
   <div class="actions">

@@ -30,6 +30,11 @@ class Bar:
 class TimelineRow:
     row: AvailabilityRow
     bars: list[Bar]
+    context: bool = False  # no problems itself, but something inside it has — kept to show where it belongs
+
+    @property
+    def shown_when_filtered(self) -> bool:
+        return bool(self.bars) or self.context
 
 
 def _ticks(begin: datetime, end: datetime) -> list[Tick]:
@@ -71,4 +76,13 @@ def build(rows: list[AvailabilityRow], begin: datetime, end: datetime, t) -> tup
             )
             bars.append(Bar(round(left, 3), round(min(width, 100 - left), 3), s.level, tip))
         out.append(TimelineRow(r, bars))
+    # Rows are in tree order (depth-first), so a row's descendants are the rows right after it
+    # with a greater depth.
+    for i, tr in enumerate(out):
+        for nxt in out[i + 1:]:
+            if nxt.row.depth <= tr.row.depth:
+                break
+            if nxt.bars:
+                tr.context = not tr.bars
+                break
     return _ticks(begin, end), out

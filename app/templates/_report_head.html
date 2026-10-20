@@ -19,7 +19,7 @@
     <span class="muted">{{ t("download") }}:</span>
     <a class="btn" href="/report/{{ job.id }}/export.csv">CSV</a>
     <a class="btn" href="/report/{{ job.id }}/export.xml">XML</a>
-    <span class="btn disabled" title="{{ t('pdf_next_stage') }}">PDF</span>
+    <a class="btn" href="/report/{{ job.id }}/export.pdf">PDF</a>
   </div>
   {% endif %}
 </section>

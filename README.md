@@ -28,6 +28,7 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/sessions.py` | Server-side sessions (the MP token never reaches the browser) |
 | `app/i18n.py` | EN/RU strings |
 | `app/templates/`, `app/static/` | Pages, styles, wizard script (no CDN — works offline) |
+| `app/fonts/` | DejaVu Sans for PDF (free licence alongside) |
 | `app/static/vendor/` | ECharts 5.5.1 (Apache 2.0, licence alongside) — bundled, no CDN |
 | `docs/MP_API_NOTES.md` | What we learned about the MultiProbe API |
 | `docs/swagger.json` | MultiProbe API spec (v26.6) |
@@ -39,5 +40,5 @@ when a file under `app/` changes, and listens on localhost only.
 2a. ✅ Problem time per object (timeline, availability table); report templates (save, share, copy, run in one click)
 3. ✅ Measurement report: server-side aggregation (auto step or 1 min … 1 day, raw up to 24 h), min/avg/max/std,
    coverage, interactive charts (ECharts, zoom synced across charts), CSV/XML export
-4. PDF export
+4. ✅ PDF export (A4 landscape, bundled DejaVu fonts for Cyrillic, timeline and charts drawn as vectors)
 5. Windows service + offline installer

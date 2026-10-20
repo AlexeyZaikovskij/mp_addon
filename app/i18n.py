@@ -67,8 +67,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "ov_share": {"en": "Compared", "ru": "Сравнение"},
     "ov_calculating": {"en": "Calculating…", "ru": "Расчёт…"},
     "ov_top_note": {
-        "en": "Channels with problems in this period: {n}. Outage = Error and Warning alarms, merged like in the alarm report. Recalculated every 3 minutes.",
-        "ru": "Каналов с проблемами за период: {n}. Недоступность — алармы Error и Warning, объединённые как в отчёте по алармам. Пересчёт раз в 3 минуты.",
+        "en": "Channels with problems in this period: {n}. Outage = {outage} alarms, degradation = {degraded}, merged like in the alarm report. Recalculated every 3 minutes.",
+        "ru": "Каналов с проблемами за период: {n}. Недоступность — алармы {outage}, деградация — {degraded}, объединённые как в отчёте по алармам. Пересчёт раз в 3 минуты.",
     },
     "ov_quick_report": {"en": "Alarm report, last 24 h", "ru": "Отчёт по алармам за 24 ч"},
     "ov_open_wizard": {"en": "Open in the report wizard…", "ru": "Открыть в мастере отчётов…"},
@@ -340,9 +340,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "sum_worst": {"en": "Most affected object", "ru": "Самый проблемный объект"},
     "timeline": {"en": "Problem timeline", "ru": "Таймлайн проблем"},
     "tl_outage": {"en": "Outage", "ru": "Недоступность"},
-    "tl_outage_hint": {"en": "Error, Warning", "ru": "Error, Warning"},
+    "tl_outage_hint": {"en": "{outage}", "ru": "{outage}"},
     "tl_degraded": {"en": "Degraded", "ru": "Деградация"},
-    "tl_degraded_hint": {"en": "Caution", "ru": "Caution"},
+    "tl_degraded_hint": {"en": "{degraded}", "ru": "{degraded}"},
     "only_problems": {"en": "Only objects with problems", "ru": "Только объекты с проблемами"},
     "no_problems": {"en": "No problems in this period.", "ru": "За этот период проблем не было."},
     "availability_title": {"en": "Availability by object", "ru": "Доступность по объектам"},
@@ -382,6 +382,20 @@ STRINGS: dict[str, dict[str, str]] = {
     "no": {"en": "No", "ru": "Нет"},
     "err_session": {"en": "Your session has expired. Please sign in again.", "ru": "Сессия истекла. Войдите снова."},
 }
+
+
+# Which MultiProbe priority groups count as outage / degradation follows config.env, so the labels
+# ("Outage (Error)") are filled in from the thresholds instead of being written into the strings.
+_GROUPS = [(400, "Error"), (300, "Warning"), (200, "Caution"), (100, "Advisory"), (0, "Log")]
+_THRESHOLDS = {
+    "outage": ", ".join(n for lo, n in _GROUPS if lo >= settings.outage_min_priority) or "—",
+    "degraded": ", ".join(n for lo, n in _GROUPS
+                          if settings.degraded_min_priority <= lo < settings.outage_min_priority) or "—",
+}
+for _entry in STRINGS.values():
+    for _lang, _text in _entry.items():
+        if "{outage}" in _text or "{degraded}" in _text:
+            _entry[_lang] = _text.replace("{outage}", _THRESHOLDS["outage"]).replace("{degraded}", _THRESHOLDS["degraded"])
 
 
 def pick_lang(request: Request) -> str:

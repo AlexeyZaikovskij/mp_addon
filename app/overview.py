@@ -31,11 +31,12 @@ def reportable(obj: dict) -> bool:
 
 
 def state_of(priority: int | None) -> str:
+    """A channel's state is the MultiProbe priority group of its most severe active alarm."""
     if priority is None or priority < settings.degraded_min_priority:
         return "ok"
     if priority >= 400:
         return "error"
-    if priority >= settings.outage_min_priority:
+    if priority >= 300:
         return "warning"
     return "caution"
 

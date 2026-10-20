@@ -47,7 +47,7 @@ def load_settings() -> Settings:
         port=int(get("PORT", "8090")),
         session_idle_minutes=int(get("SESSION_IDLE_MINUTES", "480")),
         default_lang=get("DEFAULT_LANG", "en"),
-        outage_min_priority=int(get("OUTAGE_MIN_PRIORITY", "300")),
+        outage_min_priority=int(get("OUTAGE_MIN_PRIORITY", "400")),
         degraded_min_priority=int(get("DEGRADED_MIN_PRIORITY", "200")),
         pdf_max_rows=int(get("PDF_MAX_ROWS", "2000")),
         data_dir=Path(get("DATA_DIR", str(ROOT / "data"))),

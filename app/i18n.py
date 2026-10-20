@@ -74,6 +74,53 @@ STRINGS: dict[str, dict[str, str]] = {
     "ov_open_wizard": {"en": "Open in the report wizard…", "ru": "Открыть в мастере отчётов…"},
     "ov_by_template": {"en": "Run a template for this channel", "ru": "Запустить шаблон для этого канала"},
     "ov_no_templates": {"en": "No templates yet", "ru": "Шаблонов пока нет"},
+    "nav_servers": {"en": "Servers", "ru": "Серверы"},
+    "servers_hint": {
+        "en": "Nodes of every MultiProbe server you are connected to. Tick several to build one report across them.",
+        "ru": "Узлы всех MultiProbe-серверов, к которым вы подключены. Отметьте несколько, чтобы построить общий отчёт.",
+    },
+    "err_not_connected": {
+        "en": "You are not connected to the server “{name}”. Connect to it on the Servers page.",
+        "ru": "Нет подключения к серверу «{name}». Подключитесь к нему на странице «Серверы».",
+    },
+    "err_server_unreachable": {"en": "The server is not reachable: {msg}", "ru": "Сервер недоступен: {msg}"},
+    "err_not_api": {
+        "en": "{url} answers, but not as the MultiProbe API. Enter the API address — usually the address of the "
+              "MultiProbe web interface without a path (http://host:port) or port 40000.",
+        "ru": "{url} отвечает, но это не API MultiProbe. Укажите адрес API — обычно это адрес веб-интерфейса "
+              "MultiProbe без пути (http://хост:порт) или порт 40000.",
+    },
+    "err_server_unavailable": {"en": "Server “{name}” did not answer", "ru": "Сервер «{name}» не ответил"},
+    "srv_add": {"en": "Add server", "ru": "Добавить сервер"},
+    "srv_hint": {
+        "en": "Independent MultiProbe installations. Every user sees this list and connects to each server with "
+              "an account of that server; passwords are not stored, only the session.",
+        "ru": "Независимые установки MultiProbe. Список общий для всех пользователей, а подключается каждый своей "
+              "учётной записью этого сервера; пароли не хранятся — только сессия.",
+    },
+    "srv_name": {"en": "Name", "ru": "Название"},
+    "srv_name_ph": {"en": "e.g. Site 2", "ru": "например, Площадка 2"},
+    "srv_url": {"en": "API address", "ru": "Адрес API"},
+    "srv_insecure": {
+        "en": "Self-signed HTTPS certificate (do not verify)",
+        "ru": "Самоподписанный HTTPS-сертификат (не проверять)",
+    },
+    "srv_insecure_tag": {"en": "certificate not verified", "ru": "сертификат не проверяется"},
+    "srv_status": {"en": "Connection", "ru": "Подключение"},
+    "srv_main": {"en": "main", "ru": "основной"},
+    "srv_added_by": {"en": "Added by", "ru": "Добавил"},
+    "srv_connected": {"en": "Connected", "ru": "Подключено"},
+    "srv_not_connected": {"en": "Not connected", "ru": "Не подключено"},
+    "srv_connect": {"en": "Connect", "ru": "Подключиться"},
+    "srv_disconnect": {"en": "Disconnect", "ru": "Отключиться"},
+    "srv_connect_to": {"en": "Connect to {name}", "ru": "Подключение к {name}"},
+    "srv_connect_hint": {
+        "en": "Use an account of that MultiProbe server. The password is used once to sign in and is not stored.",
+        "ru": "Учётная запись этого сервера MultiProbe. Пароль используется один раз для входа и не сохраняется.",
+    },
+    "srv_connected_to": {"en": "Connected to {name}.", "ru": "Подключено к {name}."},
+    "srv_saved": {"en": "Server “{name}” saved.", "ru": "Сервер «{name}» сохранён."},
+    "srv_delete_confirm": {"en": "Remove server “{name}” from the list?", "ru": "Удалить сервер «{name}» из списка?"},
     "nav_templates": {"en": "Templates", "ru": "Шаблоны"},
     "template": {"en": "Template", "ru": "Шаблон"},
     "tpl_none": {"en": "— without a template —", "ru": "— без шаблона —"},

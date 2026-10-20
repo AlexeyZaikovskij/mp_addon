@@ -1,7 +1,9 @@
 # MultiProbe Toolkit (mp_addon)
 
-A web page for building alarm-history and measurement reports from MultiProbe.
-Users sign in with their MultiProbe account; the data comes from the MultiProbe REST API.
+A web toolkit for MultiProbe: a live overview of all channels, reports (alarm history, measurements,
+SCTE-35 markers) with CSV/XML/PDF export and templates, across one or several independent MultiProbe servers.
+Users sign in with an account of the main server (config.env) and may connect to more servers with
+their own accounts of those servers; the data comes from the MultiProbe REST API.
 
 ## Run (development)
 
@@ -42,4 +44,6 @@ when a file under `app/` changes, and listens on localhost only.
    coverage, interactive charts (ECharts, zoom synced across charts), CSV/XML export
 4. ✅ PDF export (A4 landscape, bundled DejaVu fonts for Cyrillic, timeline and charts drawn as vectors)
 4a. ✅ SCTE-35 marker report: markers, ad breaks per profile, timeline, markers missing on some profiles; CSV/XML/PDF
+4b. ✅ MultiProbe Toolkit: overview page (channel states now, most problematic channels, one click to a report)
+4c. ✅ Several independent MultiProbe servers: shared server list, per-user sign-in, reports and overview across servers
 5. Windows service + offline installer

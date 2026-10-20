@@ -12,7 +12,7 @@ ALARM_COLUMNS = [
     ("col_alarm", lambda r: r.alarm),
     ("col_condition", lambda r: r.condition),
     ("col_stream", lambda r: r.stream),
-    ("col_object", lambda r: r.object),
+    ("col_object", lambda r: r.label),
     ("col_node", lambda r: r.node),
     ("col_detected", lambda r: fmt_dt(r.detected)),
     ("col_finished", lambda r: fmt_dt(r.finished)),
@@ -68,6 +68,13 @@ def availability_csv(report: AlarmReport, t, delimiter: str) -> bytes:
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 
+def _xml_targets(params: ET.Element, p: dict) -> None:
+    """One <Server> per server/node the report covers."""
+    for t in p.get("targets") or []:
+        ET.SubElement(params, "Server", {"id": str(t["server_id"]), "name": t.get("server", ""),
+                                         "nodeId": str(t["node_id"]), "node": t.get("node", "")})
+
+
 def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
     """Own structure: <AlarmHistoryReport> with <Parameters>, <Summary> and <Alarms>.
     Times are ISO 8601 with the UTC offset of the user's time zone; durations in seconds."""
@@ -81,13 +88,13 @@ def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
     )
     params = ET.SubElement(root, "Parameters")
     ET.SubElement(params, "User").text = meta["user"]
-    ET.SubElement(params, "Server", {"id": str(report.params["node_id"])}).text = meta["server"]
+    _xml_targets(params, report.params)
     ET.SubElement(
         params,
         "Period",
         {"from": meta["period"][0].isoformat(timespec="seconds"), "to": meta["period"][1].isoformat(timespec="seconds")},
     )
-    ET.SubElement(params, "ObjectCount").text = str(len(report.params["object_ids"]))
+    ET.SubElement(params, "ObjectCount").text = str(report.params.get("object_count", 0))
 
     s = report.summary
     summary = ET.SubElement(
@@ -141,7 +148,7 @@ def alarms_xml(report: AlarmReport, meta: dict) -> bytes:
         ET.SubElement(el, "Name").text = r.alarm
         ET.SubElement(el, "Condition").text = r.condition
         ET.SubElement(el, "Stream").text = r.stream
-        ET.SubElement(el, "Object", {"id": r.object_id}).text = r.object
+        ET.SubElement(el, "Object", {"id": r.object_id, **({"server": r.server} if r.server else {})}).text = r.object
         ET.SubElement(el, "Node").text = r.node
         ET.SubElement(el, "Detected").text = r.detected.isoformat(timespec="seconds")
         if r.finished:
@@ -177,7 +184,7 @@ def measures_csv(report, t, delimiter: str) -> bytes:
             if p.avg is None:
                 continue
             nums = [p.avg] if raw else [p.min, p.avg, p.max]
-            writer.writerow([fmt_dt(p.time), s.stream, s.object, s.analyzer, s.measure, s.display_unit]
+            writer.writerow([fmt_dt(p.time), s.stream, s.label, s.analyzer, s.measure, s.display_unit]
                             + [fmt_num(s.d(n), comma) for n in nums])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
@@ -190,7 +197,7 @@ def measures_summary_csv(report, t, delimiter: str) -> bytes:
                      t("col_min"), t("col_avg"), t("col_max"), t("col_std"), t("col_coverage") + " %"])
     for s in report.series:
         st = s.stats
-        writer.writerow([s.stream, s.object, s.analyzer, s.measure, s.display_unit]
+        writer.writerow([s.stream, s.label, s.analyzer, s.measure, s.display_unit]
                         + [fmt_num(s.d(st.get(k)), comma) for k in ("min", "avg", "max", "std")]
                         + [fmt_num(st["coverage"], comma) if st.get("coverage") is not None else ""])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
@@ -206,7 +213,7 @@ def measures_xml(report, meta: dict) -> bytes:
     })
     params = ET.SubElement(root, "Parameters")
     ET.SubElement(params, "User").text = meta["user"]
-    ET.SubElement(params, "Server", {"id": str(report.params["node_id"])}).text = meta["server"]
+    _xml_targets(params, report.params)
     ET.SubElement(params, "Period", {
         "from": report.period[0].isoformat(timespec="seconds"),
         "to": report.period[1].isoformat(timespec="seconds"),
@@ -214,6 +221,7 @@ def measures_xml(report, meta: dict) -> bytes:
     for s in report.series:
         el = ET.SubElement(root, "Series", {
             "objectId": s.object_id, "object": s.object, "stream": s.stream,
+            **({"server": s.server} if s.server else {}),
             "analyzerId": str(s.analyzer_id), "analyzer": s.analyzer,
             "column": s.column, "measure": s.measure, "unit": s.unit,
         })
@@ -282,7 +290,7 @@ def scte_xml(report, meta: dict) -> bytes:
     })
     params = ET.SubElement(root, "Parameters")
     ET.SubElement(params, "User").text = meta["user"]
-    ET.SubElement(params, "Server", {"id": str(report.params["node_id"])}).text = meta["server"]
+    _xml_targets(params, report.params)
     ET.SubElement(params, "Period", {"from": report.period[0].isoformat(timespec="seconds"),
                                      "to": report.period[1].isoformat(timespec="seconds")})
     s = report.summary

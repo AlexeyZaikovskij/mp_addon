@@ -53,6 +53,11 @@ class Series:
     stats: dict[str, Any] = field(default_factory=dict)
     display_unit: str = ""   # unit shown to people, e.g. Mbit/s for a bps measure
     mult: float = 1.0        # display value = raw value × mult
+    server: str = ""         # "Server · Node" when the report covers several, else empty
+
+    @property
+    def label(self) -> str:
+        return f"{self.server} · {self.object}" if self.server else self.object
 
     @property
     def key(self) -> str:
@@ -113,7 +118,7 @@ def _stream_of(oid: str, objects: dict[str, dict]) -> str:
     return "" if cur is None or cur.get("monitoringObjectID") == oid else cur.get("name") or ""
 
 
-async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
+async def build(job: Job, conns: dict, time_zone: str) -> MeasureReport:
     p = job.params
     tz = ZoneInfo(time_zone)
     begin = datetime.fromisoformat(p["period_utc"][0])
@@ -127,18 +132,21 @@ async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
     )
     b_iso, e_iso = begin.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(token, p["node_id"])}
-    catalog = await mp_client.measure_catalog(token)
-    selected = [oid for oid in p["object_ids"] if oid in objects]
-
-    # One request per analyzer, with every selected object that has that analyzer.
-    work: list[tuple[int, list[str], list[str]]] = []
-    for aid_str, columns in (p.get("measures") or {}).items():
-        aid = int(aid_str)
-        oids = [o for o in selected if any(a["analyzerID"] == aid for a in objects[o].get("analyzerItemList") or [])]
-        if oids and columns:
-            work.append((aid, oids, list(columns)))
-    job.total_steps = max(1, sum(1 + len(oids) for _, oids, _ in work))  # data + averages per object
+    from .alarms import is_multi, target_label
+    multi = is_multi(p["targets"])
+    # One request per server and analyzer, with every selected object that has that analyzer.
+    work: list[tuple] = []
+    for t in p["targets"]:
+        conn = conns[t["server_id"]]
+        objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(conn, t["node_id"])}
+        catalog = await mp_client.measure_catalog(conn)
+        selected = [oid for oid in t["object_ids"] if oid in objects]
+        for aid_str, columns in (p.get("measures") or {}).items():
+            aid = int(aid_str)
+            oids = [o for o in selected if any(a["analyzerID"] == aid for a in objects[o].get("analyzerItemList") or [])]
+            if oids and columns:
+                work.append((conn, objects, catalog, target_label(t, multi), aid, oids, list(columns)))
+    job.total_steps = max(1, sum(1 + len(w[5]) for w in work))  # data + averages per object
 
     series: list[Series] = []
     sem = asyncio.Semaphore(CONCURRENCY)
@@ -147,14 +155,14 @@ async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
         async with sem:
             return await coro
 
-    async def fetch(aid: int, oids: list[str], columns: list[str]) -> None:
+    async def fetch(conn, objects, catalog, label, aid: int, oids: list[str], columns: list[str]) -> None:
         analyzer = catalog.get(aid, {})
         meta = {m["columnName"]: m for m in analyzer.get("measureItemList") or []}
-        items = await limited(mp_client.measure_data(token, aid, oids, columns, b_iso, e_iso, interpolation))
+        items = await limited(mp_client.measure_data(conn, aid, oids, columns, b_iso, e_iso, interpolation))
         job.done_steps += 1
         by_object = {it.get("monitoringObjectID"): it for it in items}
         averages = await asyncio.gather(
-            *(limited(mp_client.measure_averages(token, aid, oid, columns, b_iso, e_iso)) for oid in oids)
+            *(limited(mp_client.measure_averages(conn, aid, oid, columns, b_iso, e_iso)) for oid in oids)
         )
         job.done_steps += len(oids)
         for oid, avg in zip(oids, averages):
@@ -170,6 +178,7 @@ async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
                     column=col,
                     measure=m.get("name") or col,
                     unit=m.get("unit") or "",
+                    server=label,
                 )
                 s.points = _points(item, col, tz, raw=resolution == "raw")
                 job.rows_fetched += len(s.points)
@@ -178,10 +187,9 @@ async def build(job: Job, token: str, time_zone: str) -> MeasureReport:
 
     await asyncio.gather(*(fetch(*w) for w in work))
 
-    order = {oid: i for i, oid in enumerate(p["object_ids"])}
     measure_order = {f"{aid}|{c}": (i, j) for i, (aid, cols) in enumerate((p.get("measures") or {}).items())
                      for j, c in enumerate(cols)}
-    series.sort(key=lambda s: (measure_order.get(s.key, (99, 99)), s.stream.lower(), s.object.lower(), order.get(s.object_id, 0)))
+    series.sort(key=lambda s: (measure_order.get(s.key, (99, 99)), s.server.lower(), s.stream.lower(), s.object.lower()))
     _assign_display_units(series)
     return MeasureReport(
         params=p, series=series, resolution=resolution, step=step,

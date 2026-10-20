@@ -8,7 +8,7 @@
     {% if job.params.get("template") %}<div><dt>{{ t("template") }}</dt><dd>{{ job.params.template }}</dd></div>{% endif %}
     <div><dt>{{ t("server") }}</dt><dd>{{ job.params.get("server", "…") }}</dd></div>
     <div><dt>{{ t("period") }}</dt><dd>{{ period[0] }} — {{ period[1] }}</dd></div>
-    <div><dt>{{ t("objects") }}</dt><dd>{{ job.params.object_ids | length }}</dd></div>
+    <div><dt>{{ t("objects") }}</dt><dd>{{ job.params.get("object_count") or (job.params.get("object_ids") or []) | length }}</dd></div>
     <div><dt>{{ t("user") }}</dt><dd>{{ job.params.user }}</dd></div>
     {% if extra_meta %}{% for label, value in extra_meta %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}{% endif %}
     <div><dt>{{ t("time_zone") }}</dt><dd>{{ job.params.time_zone }}</dd></div>

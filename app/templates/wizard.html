@@ -35,9 +35,9 @@
 
   <section class="card">
     <h2><span class="num">2</span>{{ t("step_server") }}</h2>
-    <select id="node" required>
-      <option value="">{{ t("loading") }}</option>
-    </select>
+    <div class="node-list" id="nodes"><p class="muted">{{ t("loading") }}</p></div>
+    <div id="node-errors"></div>
+    <p class="muted note">{{ t("servers_hint") }} <a class="link" href="/servers">{{ t("nav_servers") }}</a></p>
   </section>
 
   <section class="card">

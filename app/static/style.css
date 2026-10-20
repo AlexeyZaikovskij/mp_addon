@@ -297,3 +297,21 @@ tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 .menu-sep { color: var(--muted); font-size: 12px; padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 4px; }
 .menu-empty { color: var(--muted); font-size: 12px; padding: 4px 10px 8px; }
 @media (max-width: 900px) { .ov-grid { grid-template-columns: 1fr; } }
+
+/* Servers */
+.node-list { display: flex; flex-direction: column; gap: 6px; }
+.node-group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.node-server { font-weight: 600; min-width: 140px; margin-right: 8px; }
+.srv-form { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; padding: 12px; margin-bottom: 12px;
+  background: #f6f8fa; border-radius: 6px; }
+.srv-form label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.srv-form label.inline { flex-direction: row; align-items: center; font-size: 14px; color: var(--text); }
+.srv-form #srv-url { min-width: 300px; }
+.srv-form-actions { display: flex; gap: 12px; align-items: center; }
+.srv-on { color: #1e6b2a; font-weight: 600; }
+.small { font-size: 12px; }
+.tag.warn { background: #fff0d9; color: #9a5300; }
+.modal { position: fixed; inset: 0; background: rgba(22, 32, 47, .45); display: grid; place-items: center; z-index: 30; }
+.modal-card { width: min(420px, calc(100vw - 32px)); margin: 0; }
+.modal-card label { display: block; margin-bottom: 10px; color: var(--muted); }
+.modal-card input { display: block; width: 100%; margin-top: 4px; }

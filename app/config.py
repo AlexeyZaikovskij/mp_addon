@@ -22,6 +22,7 @@ def _read_env_file(path: Path) -> dict[str, str]:
 @dataclass(frozen=True)
 class Settings:
     mp_api_url: str
+    main_server_name: str
     host: str
     port: int
     session_idle_minutes: int
@@ -41,6 +42,7 @@ def load_settings() -> Settings:
 
     return Settings(
         mp_api_url=get("MP_API_URL", "http://localhost:40000").rstrip("/"),
+        main_server_name=get("MAIN_SERVER_NAME", "Main"),
         host=get("HOST", "0.0.0.0"),
         port=int(get("PORT", "8090")),
         session_idle_minutes=int(get("SESSION_IDLE_MINUTES", "480")),

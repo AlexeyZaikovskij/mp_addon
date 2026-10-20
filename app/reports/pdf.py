@@ -392,7 +392,7 @@ def _alarm_list(report, t, max_rows: int) -> list:
     extra = []
     for i, r in enumerate(shown, start=1):
         data.append([
-            P(f"{r.group} {r.priority}"), P(r.alarm), P(r.condition), P(r.stream), P(r.object),
+            P(f"{r.group} {r.priority}"), P(r.alarm), P(r.condition), P(r.stream), P(r.label),
             fmt_dt(r.detected), status_text(r, t) if r.active else fmt_dt(r.finished), fmt_duration(r.duration_sec),
         ])
         bg = PRIORITY_BG.get(r.group.lower())
@@ -432,7 +432,7 @@ def measures_pdf(job, report, t, period: list[str], generated: str, max_series_p
             } for i, s in enumerate(shown)]
             head = f"{mtitle}" + (f" ({unit})" if unit else "") + f" · {group[0].analyzer}"
             block = [Paragraph(escape(head), S_H2), line_chart(chart_series, x0, x1)]
-            block.append(_legend([(PALETTE[i], s.object) for i, s in enumerate(shown)]))
+            block.append(_legend([(PALETTE[i], s.label) for i, s in enumerate(shown)]))
             notes = []
             if single:
                 notes.append(t("chart_band_hint"))
@@ -465,7 +465,7 @@ def _measure_summary(report, t) -> list:
         for s in group:
             st = s.stats
             cov = st.get("coverage")
-            data.append([P(s.stream), P(s.object)] + [fmt_num(s.d(st.get(k)), False, 2) for k in ("min", "avg", "max", "std")]
+            data.append([P(s.stream), P(s.label)] + [fmt_num(s.d(st.get(k)), False, 2) for k in ("min", "avg", "max", "std")]
                         + [f"{cov:.0f} %" if cov is not None else str(st.get("points", 0))])
             if cov is not None and cov < 90:
                 extra.append(("TEXTCOLOR", (6, len(data) - 1), (6, len(data) - 1), BAD))

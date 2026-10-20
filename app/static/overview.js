@@ -77,8 +77,8 @@
       <div class="ov-item">
         <span class="ov-dot" style="background:${st.color}" title="${escapeHtml(st.label)}"></span>
         <div class="ov-main">
-          <button type="button" class="link ov-name" data-node="${c.node_id}" data-id="${c.id}" data-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>
-          <span class="muted">${escapeHtml(c.stream)}</span>
+          <button type="button" class="link ov-name" data-server="${c.server_id}" data-node="${c.node_id}" data-id="${c.id}" data-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>
+          <span class="muted">${escapeHtml(state.servers.length > 1 ? `${c.server} · ${c.stream}` : c.stream)}</span>
           ${c.alarms.length ? `<div class="ov-alarms">${c.alarms.map(escapeHtml).join(", ")}</div>` : ""}
         </div>
         <div class="ov-side">
@@ -102,6 +102,8 @@
     try {
       state = await api("/api/overview/state");
       $("#updated").textContent = state.updated;
+      $("#server-errors").innerHTML = state.errors.map((e) =>
+        `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
       renderPie();
       renderNow();
     } catch (err) {
@@ -122,8 +124,8 @@
       $("#top-rows").innerHTML = data.rows.length ? data.rows.map((r, i) => `
         <tr>
           <td class="muted">${i + 1}</td>
-          <td><button type="button" class="link ov-name" data-node="${r.node_id}" data-id="${r.id}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)}</button></td>
-          <td>${escapeHtml(r.stream)}</td>
+          <td><button type="button" class="link ov-name" data-server="${r.server_id}" data-node="${r.node_id}" data-id="${r.id}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)}</button></td>
+          <td>${escapeHtml(state && state.servers.length > 1 ? `${r.server} · ${r.stream}` : r.stream)}</td>
           <td class="num-cell bad">${fmtDuration(r.outage_sec)}</td>
           <td class="ov-share"><span style="width:${(100 * r.outage_sec / max).toFixed(1)}%"></span></td>
           <td class="num-cell">${r.availability.toFixed(2)} %</td>
@@ -152,7 +154,7 @@
     const btn = e.target.closest(".ov-name");
     if (btn) {
       e.stopPropagation();
-      target = { node_id: Number(btn.dataset.node), id: btn.dataset.id, name: btn.dataset.name };
+      target = { server_id: Number(btn.dataset.server || 0), node_id: Number(btn.dataset.node), id: btn.dataset.id, name: btn.dataset.name };
       if (templates === null) templates = await api("/api/templates").catch(() => []);
       openMenu(btn);
       return;
@@ -179,14 +181,14 @@
   menu.addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-act]");
     if (!b) return;
-    const objects = { node_id: target.node_id, object_ids: [target.id] };
+    const objects = { server_id: target.server_id, node_id: target.node_id, object_ids: [target.id] };
     try {
       b.disabled = true;
       if (b.dataset.act === "quick") {
         const { id } = await api("/api/report/quick?hours=24", objects);
         location.href = `/report/${id}`;
       } else if (b.dataset.act === "wizard") {
-        location.href = `/reports?node=${target.node_id}&select=${encodeURIComponent(target.id)}`;
+        location.href = `/reports?server=${target.server_id}&node=${target.node_id}&select=${encodeURIComponent(target.id)}`;
       } else {
         const { id } = await api(`/api/templates/${b.dataset.tpl}/run`, objects);
         location.href = `/report/${id}`;

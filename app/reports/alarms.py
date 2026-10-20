@@ -35,6 +35,11 @@ class AlarmRow:
     duration_sec: int
     active: bool
     confirmed: bool
+    server: str = ""  # "Server · Node" when the report covers several, else empty
+
+    @property
+    def label(self) -> str:
+        return f"{self.server} · {self.object}" if self.server else self.object
 
 
 @dataclass
@@ -91,28 +96,72 @@ def _stream_of(oid: str, objects: dict[str, dict]) -> str:
     return current.get("name") or ""
 
 
-async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
+def target_label(t: dict, multi: bool) -> str:
+    """How a server/node appears in a report that covers several of them."""
+    return f'{t.get("server", "")} · {t.get("node", "")}' if multi else ""
+
+
+def is_multi(targets: list[dict]) -> bool:
+    return len({(t["server_id"], t["node_id"]) for t in targets}) > 1
+
+
+async def build(job: Job, conns: dict, time_zone: str) -> AlarmReport:
+    """conns: server id -> mp_client.Conn for every server in job.params["targets"]."""
     p = job.params
     tz = ZoneInfo(time_zone)
     begin = datetime.fromisoformat(p["period_utc"][0])
     end = datetime.fromisoformat(p["period_utc"][1])
-    selected = set(p["object_ids"])
+    targets = p["targets"]
+    multi = is_multi(targets)
+    windows = _windows(begin, end)
+    job.total_steps = max(1, len(windows) * len(targets))
+    now = datetime.now(tz)
+    period = (begin.astimezone(tz), end.astimezone(tz))
+
+    rows: list[AlarmRow] = []
+    availability: list[AvailabilityRow] = []
+    for t in targets:
+        conn = conns[t["server_id"]]
+        t_rows, objects, selected = await _fetch_target(job, conn, t, p, windows, tz, now)
+        label = target_label(t, multi)
+        for r in t_rows:
+            r.server = label
+        rows += t_rows
+        avail = avail_calc.compute(
+            t_rows, objects, selected, period[0], period[1], now,
+            settings.outage_min_priority, settings.degraded_min_priority,
+        )
+        if multi:  # a context row per server/node, everything else one level deeper
+            availability.append(AvailabilityRow(object_id=f'target:{t["server_id"]}:{t["node_id"]}',
+                                                name=label, kind="target", kind_name="", depth=0))
+            for a in avail:
+                a.depth += 1
+                a.server = label
+        availability += avail
+    rows.sort(key=lambda x: x.detected, reverse=True)
+
+    report = AlarmReport(params=p, rows=rows, period=period)
+    report.availability = availability
+    report.summary = summarize(rows, availability, await mp_client.alarm_groups(conns[targets[0]["server_id"]]))
+    return report
+
+
+async def _fetch_target(job: Job, conn, t: dict, p: dict, windows, tz: ZoneInfo, now: datetime):
+    """Alarm rows of one server/node: (rows, all objects of the node, selected ids)."""
+    selected = set(t["object_ids"])
     # Alarms the user un-ticked. Storing exclusions (not inclusions) keeps templates working
     # when new alarm types are added to MultiProbe later.
     excluded = set(p.get("alarm_exclude") or [])
-
-    all_objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(token, p["node_id"])}
-    catalog = await mp_client.alarm_catalog(token)
+    all_objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(conn, t["node_id"])}
+    catalog = await mp_client.alarm_catalog(conn)
     request_ids = _top_most(selected, {k: v.get("parentID") for k, v in all_objects.items()})
-
-    windows = _windows(begin, end)
-    job.total_steps = len(windows)
     raw: dict[tuple, dict] = {}
     sem = asyncio.Semaphore(CONCURRENCY)
+    fetched_before = job.rows_fetched
 
     async def fetch(window: tuple[str, str]) -> None:
         async with sem:
-            items = await mp_client.alarm_log_window(token, request_ids, *window)
+            items = await mp_client.alarm_log_window(conn, request_ids, *window)
         for r in items:
             if r.get("monitoringObjectID") not in selected:
                 continue
@@ -126,13 +175,15 @@ async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
             if known is None or (not known.get("alarmEnd") and r.get("alarmEnd")):
                 raw[key] = r
         job.done_steps += 1
-        job.rows_fetched = len(raw)
-        if len(raw) > MAX_EVENTS:
+        job.rows_fetched = fetched_before + len(raw)
+        if job.rows_fetched > MAX_EVENTS:
             raise RuntimeError(f"More than {MAX_EVENTS} events — narrow the period or the objects.")
 
-    await asyncio.gather(*(fetch(w) for w in windows))
+    if request_ids:
+        await asyncio.gather(*(fetch(w) for w in windows))
+    else:
+        job.done_steps += len(windows)
 
-    now = datetime.now(tz)
     rows = []
     for r in raw.values():
         detected = _parse(r.get("alarmBegin"), tz)
@@ -161,15 +212,7 @@ async def build(job: Job, token: str, time_zone: str) -> AlarmReport:
                 confirmed=bool((r.get("confirmation") or {}).get("isConfirmed")),
             )
         )
-    rows.sort(key=lambda x: x.detected, reverse=True)
-
-    report = AlarmReport(params=p, rows=rows, period=(begin.astimezone(tz), end.astimezone(tz)))
-    report.availability = avail_calc.compute(
-        rows, all_objects, selected, report.period[0], report.period[1], now,
-        settings.outage_min_priority, settings.degraded_min_priority,
-    )
-    report.summary = summarize(rows, report.availability, await mp_client.alarm_groups(token))
-    return report
+    return rows, all_objects, selected
 
 
 def summarize(
@@ -177,6 +220,7 @@ def summarize(
 ) -> dict[str, Any]:
     by_group = Counter(r.group for r in rows)
     order = {g["name"]: -g.get("beginPriority", 0) for g in groups}  # most severe first
+    avail = [a for a in avail if a.kind != "target"]  # server/node context rows are not objects
     worst = max(avail, key=lambda a: a.outage_sec, default=None)
     return {
         "total": len(rows),
@@ -184,8 +228,8 @@ def summarize(
         "objects": len(avail),
         "objects_with_outage": sum(a.outage_sec > 0 for a in avail),
         "availability": round(sum(a.availability for a in avail) / len(avail), 2) if avail else 100.0,
-        "worst": (worst.name, worst.outage_sec) if worst and worst.outage_sec else None,
+        "worst": (worst.label, worst.outage_sec) if worst and worst.outage_sec else None,
         "by_group": sorted(by_group.items(), key=lambda kv: (order.get(kv[0], 0), kv[0])),
         "top_alarms": Counter(r.alarm for r in rows).most_common(10),
-        "top_objects": Counter(r.object for r in rows).most_common(10),
+        "top_objects": Counter(f"{r.server} · {r.object}" if r.server else r.object for r in rows).most_common(10),
     }

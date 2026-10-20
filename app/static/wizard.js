@@ -4,7 +4,14 @@
   const $ = (sel) => document.querySelector(sel);
   const form = $("#wizard");
 
-  let objects = [];            // objects of the current node
+  // Objects of every ticked node. Ids are "server:node|objectId" so objects of different servers
+  // never clash; with several nodes each gets a root row "Server · Node".
+  let objects = [];
+  let nodesAll = [];
+  const checkedNodes = new Set(); // "server:node"
+  const nodeKey = (sid, nid) => `${sid}:${nid}`;
+  const rawId = (id) => id.slice(id.indexOf("|") + 1);
+  const nodeOf = (id) => id.slice(0, id.indexOf("|"));
   const selected = new Set();  // selected object ids
   const expanded = new Set();  // ids of open tree branches; everything starts collapsed
   const checkedMeasures = new Set(); // "analyzerId|column"
@@ -32,25 +39,54 @@
 
   // --- Step 2: servers ------------------------------------------------------
   async function loadNodes() {
-    const nodes = await api("/api/nodes");
-    const sel = $("#node");
-    sel.innerHTML = `<option value="">${T.select_server}</option>` +
-      nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
-    if (nodes.length === 1) {
-      sel.value = nodes[0].id;
+    const data = await api("/api/nodes", undefined, "GET");
+    nodesAll = data.nodes;
+    const groups = new Map();
+    for (const n of nodesAll) (groups.get(n.server) || groups.set(n.server, []).get(n.server)).push(n);
+    $("#nodes").innerHTML = nodesAll.length ? [...groups.entries()].map(([server, list]) => `
+      <div class="node-group">
+        ${data.multi_server ? `<div class="node-server">${escapeHtml(server)}</div>` : ""}
+        ${list.map((n) => `<label class="inline"><input type="checkbox" data-node="${nodeKey(n.server_id, n.id)}"
+            ${checkedNodes.has(nodeKey(n.server_id, n.id)) ? "checked" : ""}> ${escapeHtml(n.name)}</label>`).join("")}
+      </div>`).join("") : `<p class="muted">—</p>`;
+    $("#node-errors").innerHTML = data.errors.map((e) =>
+      `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
+    if (nodesAll.length === 1 && !checkedNodes.size) {
+      checkedNodes.add(nodeKey(nodesAll[0].server_id, nodesAll[0].id));
+      $("#nodes input").checked = true;
       await loadObjects();
     }
   }
 
-  async function loadObjects() {
+  $("#nodes").addEventListener("change", (e) => {
+    const key = e.target.dataset.node;
+    if (!key) return;
+    if (e.target.checked) checkedNodes.add(key); else checkedNodes.delete(key);
+    loadObjects(true);
+  });
+
+  // keep = keep the ticks of objects that are still listed (a node was added or removed)
+  async function loadObjects(keep = false) {
+    const before = new Set(selected);
     selected.clear();
-    expanded.clear();
+    if (!keep) expanded.clear();
     objects = [];
-    const nodeId = $("#node").value;
-    $("#obj-tree").innerHTML = `<p class="muted">${nodeId ? T.loading : T.select_server}</p>`;
-    if (nodeId) {
-      objects = await api(`/api/objects?node_id=${encodeURIComponent(nodeId)}`);
+    $("#obj-tree").innerHTML = `<p class="muted">${checkedNodes.size ? T.loading : T.select_server}</p>`;
+    const grouped = checkedNodes.size > 1 || nodesAll.some((n) => n.server_id !== 0);
+    for (const key of checkedNodes) {
+      const [sid, nid] = key.split(":").map(Number);
+      const node = nodesAll.find((n) => n.server_id === sid && n.id === nid);
+      const list = await api(`/api/objects?server_id=${sid}&node_id=${nid}`, undefined, "GET");
+      if (grouped) {
+        objects.push({ id: key, parentId: null, name: node ? `${node.server} · ${node.name}` : key,
+                       kindName: "", analyzers: [], synthetic: true });
+        expanded.add(key);
+      }
+      for (const o of list) {
+        objects.push({ ...o, id: `${key}|${o.id}`, parentId: o.parentId ? `${key}|${o.parentId}` : (grouped ? key : null) });
+      }
     }
+    for (const o of objects) if (before.has(o.id)) selected.add(o.id);
     renderTree();
     selectionChanged();
   }
@@ -159,7 +195,6 @@
     selectionChanged();
   });
   $("#obj-clear").addEventListener("click", () => { selected.clear(); renderTree(); selectionChanged(); });
-  $("#node").addEventListener("change", loadObjects);
 
   function selectionChanged() {
     $("#obj-count").textContent = selected.size ? `${T.selected}: ${selected.size}` : "";
@@ -352,10 +387,18 @@
       const [id, column] = key.split("|");
       (measures[id] ||= []).push(column);
     }
+    const byNode = new Map();
+    for (const id of selected) {
+      if (!id.includes("|")) continue; // a "Server · Node" row, not an object
+      const key = nodeOf(id);
+      (byNode.get(key) || byNode.set(key, []).get(key)).push(rawId(id));
+    }
     const payload = {
       type: reportType(),
-      node_id: Number($("#node").value),
-      object_ids: [...selected],
+      targets: [...byNode.entries()].map(([key, ids]) => {
+        const [server_id, node_id] = key.split(":").map(Number);
+        return { server_id, node_id, object_ids: ids };
+      }),
       alarm_exclude: alarms ? alarmIdsShown.filter((id) => uncheckedAlarms.has(id)) : [],
       measures: isMeasures ? measures : {},
       resolution: isMeasures ? $("#resolution").value : "auto",
@@ -368,7 +411,7 @@
     if (periodHours) payload.period_hours = periodHours;
     else Object.assign(payload, { period_from: $("#from").value, period_to: $("#to").value });
 
-    if (!payload.node_id || !payload.object_ids.length) throw new Error(T.pick_objects_first);
+    if (!payload.targets.length) throw new Error(T.pick_objects_first);
     if (alarms && alarmIdsShown.length && !checkedAlarmIds().length) throw new Error(T.pick_alarms);
     if (isMeasures && !checkedMeasures.size) throw new Error(T.pick_measures);
     if (type === "scte" && !objects.some((o) => selected.has(o.id) && o.analyzers.includes(SCTE_ANALYZER))) {
@@ -384,11 +427,18 @@
 
   async function applyTemplate(p) {
     form.querySelector(`input[name=type][value="${p.type}"]`).checked = true;
-    $("#node").value = String(p.node_id);
+    // Templates saved before several servers were supported: one node of the main server.
+    const targets = p.targets || [{ server_id: 0, node_id: p.node_id, object_ids: p.object_ids || [] }];
+    checkedNodes.clear();
+    for (const t of targets) {
+      if (nodesAll.some((n) => n.server_id === t.server_id && n.id === t.node_id)) checkedNodes.add(nodeKey(t.server_id, t.node_id));
+    }
+    for (const b of document.querySelectorAll("#nodes input[data-node]")) b.checked = checkedNodes.has(b.dataset.node);
     await loadObjects();
     const known = new Set(objects.map((o) => o.id));
-    const missing = p.object_ids.filter((id) => !known.has(id)).length;
-    p.object_ids.filter((id) => known.has(id)).forEach((id) => selected.add(id));
+    const wantedIds = targets.flatMap((t) => t.object_ids.map((id) => `${nodeKey(t.server_id, t.node_id)}|${id}`));
+    const missing = wantedIds.filter((id) => !known.has(id)).length;
+    wantedIds.filter((id) => known.has(id)).forEach((id) => selected.add(id));
     uncheckedAlarms.clear();
     (p.alarm_exclude || []).forEach((id) => uncheckedAlarms.add(id));
     checkedMeasures.clear();
@@ -416,11 +466,14 @@
   }
 
   // Opened from the overview: tick a channel and everything inside it, open the branches leading to it.
-  async function preselect(nodeId, objectId) {
-    if (nodeId && String(nodeId) !== $("#node").value) {
-      $("#node").value = String(nodeId);
-      await loadObjects();
+  async function preselect(serverId, nodeId, rawObjectId) {
+    const key = nodeKey(serverId, nodeId);
+    if (!checkedNodes.has(key)) {
+      checkedNodes.add(key);
+      for (const b of document.querySelectorAll("#nodes input[data-node]")) b.checked = checkedNodes.has(b.dataset.node);
+      await loadObjects(true);
     }
+    const objectId = `${key}|${rawObjectId}`;
     const children = new Map();
     for (const o of objects) {
       if (o.parentId) (children.get(o.parentId) || children.set(o.parentId, []).get(o.parentId)).push(o.id);
@@ -541,7 +594,7 @@
       const wanted = query.get("template");
       await loadTemplates(wanted);
       if (wanted) await openTemplate(wanted);
-      else if (query.get("select")) await preselect(Number(query.get("node")), query.get("select"));
+      else if (query.get("select")) await preselect(Number(query.get("server") || 0), Number(query.get("node")), query.get("select"));
     } catch (err) {
       showMessage(err.message, true);
     }

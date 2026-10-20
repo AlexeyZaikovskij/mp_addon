@@ -33,6 +33,11 @@ class AvailabilityRow:
     incidents: int = 0
     longest_sec: int = 0
     spans: list[Span] = field(default_factory=list)
+    server: str = ""  # "Server · Node" when the report covers several
+
+    @property
+    def label(self) -> str:
+        return f"{self.server} · {self.name}" if self.server else self.name
 
 
 def merge(intervals: list[Interval]) -> list[Interval]:

@@ -42,7 +42,7 @@
         {% for s in group %}
         <tr>
           <td>{{ s.stream }}</td>
-          <td>{{ s.object }}</td>
+          <td>{{ s.label }}</td>
           <td class="num-cell">{{ fmt_num(s.d(s.stats.min), False, 2) }}</td>
           <td class="num-cell">{{ fmt_num(s.d(s.stats.avg), False, 2) }}</td>
           <td class="num-cell">{{ fmt_num(s.d(s.stats.max), False, 2) }}</td>

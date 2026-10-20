@@ -1,8 +1,10 @@
 """MultiProbe Toolkit: web entry point."""
+import asyncio
 from contextlib import asynccontextmanager
 from functools import partial
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -56,9 +58,25 @@ async def _session_expired(request: Request, _: SessionExpired):
 @app.exception_handler(mp_client.MPError)
 async def _mp_error(request: Request, exc: mp_client.MPError):
     if isinstance(exc, mp_client.MPAuthError):
-        sessions.drop(request.cookies.get(sessions.COOKIE_NAME))
-        return await _session_expired(request, SessionExpired())
+        if exc.server_id in (None, sessions.MAIN_SERVER):
+            sessions.drop(request.cookies.get(sessions.COOKIE_NAME))
+            return await _session_expired(request, SessionExpired())
+        # Another server no longer accepts the token: disconnect just that one.
+        session = sessions.get(request.cookies.get(sessions.COOKIE_NAME))
+        if session:
+            session.conns.pop(exc.server_id, None)
+        return await _not_connected(request, sessions.NotConnected(exc.server_id))
     return JSONResponse({"error": exc.code, "message": exc.message}, status_code=502)
+
+
+@app.exception_handler(sessions.NotConnected)
+async def _not_connected(request: Request, exc: sessions.NotConnected):
+    t = i18n.translator(i18n.pick_lang(request))
+    server = storage.get_server(exc.server_id) or {}
+    message = t("err_not_connected", name=server.get("name") or f"#{exc.server_id}")
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "not_connected", "server_id": exc.server_id, "message": message}, status_code=409)
+    return RedirectResponse("/servers", status_code=303)
 
 
 def current_session(request: Request) -> sessions.Session:
@@ -86,7 +104,7 @@ async def login_page(request: Request):
 async def login_submit(request: Request, login: str = Form(...), password: str = Form(...)):
     t = i18n.translator(i18n.pick_lang(request))
     try:
-        token, profile = await mp_client.login(login, password)
+        token, profile = await mp_client.login(settings.mp_api_url, login, password)
     except mp_client.MPAuthError as exc:
         error = {
             "authErrorUserDisabled": t("err_user_disabled"),
@@ -99,7 +117,10 @@ async def login_submit(request: Request, login: str = Form(...), password: str =
 
     response = RedirectResponse("/", status_code=303)
     response.set_cookie(
-        sessions.COOKIE_NAME, sessions.create(token, profile), httponly=True, samesite="lax"
+        sessions.COOKIE_NAME,
+        sessions.create(mp_client.Conn(sessions.MAIN_SERVER, settings.main_server_name, settings.mp_api_url, token),
+                        profile, login),
+        httponly=True, samesite="lax",
     )
     return response
 
@@ -130,8 +151,17 @@ async def wizard(request: Request, session: sessions.Session = Depends(current_s
 
 @app.get("/api/nodes")
 async def api_nodes(session: sessions.Session = Depends(current_session)):
-    items = await mp_client.nodes(session.token)
-    return [{"id": n["nodeID"], "name": n["name"]} for n in sorted(items, key=lambda n: n["name"])]
+    """Probe nodes of every server the user is connected to. A server that fails is reported, not fatal."""
+    conns = sorted(session.conns.values(), key=lambda c: (c.server_id != sessions.MAIN_SERVER, c.name.lower()))
+    results = await asyncio.gather(*(mp_client.nodes(c) for c in conns), return_exceptions=True)
+    out, errors = [], []
+    for c, res in zip(conns, results):
+        if isinstance(res, Exception):
+            errors.append({"server_id": c.server_id, "server": c.name, "message": str(res)})
+            continue
+        for n in sorted(res, key=lambda n: n["name"]):
+            out.append({"server_id": c.server_id, "server": c.name, "id": n["nodeID"], "name": n["name"]})
+    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1}
 
 
 def _is_reportable(obj: dict) -> bool:
@@ -139,9 +169,9 @@ def _is_reportable(obj: dict) -> bool:
 
 
 @app.get("/api/objects")
-async def api_objects(node_id: int, session: sessions.Session = Depends(current_session)):
+async def api_objects(node_id: int, server_id: int = 0, session: sessions.Session = Depends(current_session)):
     """Streams and the objects inside them (services, PIDs), without hidden ones."""
-    items = await mp_client.monitoring_objects(session.token, node_id)
+    items = await mp_client.monitoring_objects(session.conn(server_id), node_id)
     return [
         {
             "id": o["monitoringObjectID"],
@@ -163,7 +193,7 @@ class MeasuresRequest(BaseModel):
 @app.post("/api/measures")
 async def api_measures(req: MeasuresRequest, session: sessions.Session = Depends(current_session)):
     """Measures available for the analyzers of the selected objects, grouped by analyzer."""
-    catalog = await mp_client.measure_catalog(session.token)
+    catalog = await mp_client.measure_catalog(session.main)
     result = []
     for analyzer_id in sorted(set(req.analyzer_ids)):
         analyzer = catalog.get(analyzer_id)
@@ -192,8 +222,8 @@ class AlarmTypesRequest(BaseModel):
 async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = Depends(current_session)):
     """Alarm definitions of the selected objects' analyzers, grouped by severity (most severe first).
     Every MultiProbe priority group is listed, even when none of its alarms apply to the objects."""
-    catalog = await mp_client.alarm_catalog(session.token)
-    groups = await mp_client.alarm_groups(session.token)
+    catalog = await mp_client.alarm_catalog(session.main)
+    groups = await mp_client.alarm_groups(session.main)
     wanted = set(req.analyzer_ids)
     by_group: dict[str, list[dict]] = {g["name"]: [] for g in groups}
     for a in catalog.values():
@@ -210,11 +240,20 @@ async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = De
 
 # --- Report generation ------------------------------------------------------
 
+class Target(BaseModel):
+    """Objects of one probe node on one MultiProbe server."""
+    server_id: int = 0
+    node_id: int
+    object_ids: list[str] = Field(min_length=1)
+
+
 class ReportRequest(BaseModel):
     """Everything the wizard collects. A report template stores exactly this."""
     type: Literal["alarms", "measures", "scte"]
-    node_id: int
-    object_ids: list[str] = Field(min_length=1)
+    targets: list[Target] | None = None
+    # Templates saved before several servers were supported: one node of the main server.
+    node_id: int | None = None
+    object_ids: list[str] | None = None
     alarm_exclude: list[int] = []  # alarm types the user un-ticked
     measures: dict[int, list[str]] = {}  # analyzerID -> measure column names
     period_hours: int | None = Field(None, gt=0)  # "last N hours", resolved when the report runs
@@ -267,9 +306,19 @@ def _period(req: ReportRequest, tz: ZoneInfo) -> tuple[datetime, datetime]:
     return begin, end
 
 
+def _targets(req: ReportRequest) -> list[Target]:
+    if req.targets:
+        return req.targets
+    if req.node_id is not None and req.object_ids:
+        return [Target(server_id=sessions.MAIN_SERVER, node_id=req.node_id, object_ids=req.object_ids)]
+    raise HTTPException(422, "No objects selected")
+
+
 def _start_report(req: ReportRequest, session: sessions.Session, template_name: str = "") -> jobs.Job:
     tz = _user_tz(session)
     begin, end = _period(req, tz)
+    targets = _targets(req)
+    conns = {t.server_id: session.conn(t.server_id) for t in targets}  # NotConnected -> "connect first"
     if req.sections is not None:
         allowed = SECTIONS[req.type]
         req.sections = [s for s in req.sections if s in allowed]
@@ -282,22 +331,27 @@ def _start_report(req: ReportRequest, session: sessions.Session, template_name: 
         if req.resolution == "raw" and end - begin > measure_report.RAW_MAX_PERIOD:
             raise HTTPException(422, i18n.translator("en")("err_raw_too_long"))
     params = {
-        **req.model_dump(mode="json"),
+        **req.model_dump(mode="json", exclude={"node_id", "object_ids"}),
+        "targets": [{**t.model_dump(), "server": conns[t.server_id].name} for t in targets],
+        "object_count": sum(len(t.object_ids) for t in targets),
         "period_utc": [begin.isoformat(), end.isoformat()],
         "time_zone": str(tz),
         "user": session.user_name,
         "template": template_name,
     }
-    token = session.token
 
     async def work(job: jobs.Job):
-        nodes = await mp_client.nodes(token)
-        job.params["server"] = next((n["name"] for n in nodes if n["nodeID"] == req.node_id), str(req.node_id))
-        if req.type == "measures":
-            return await measure_report.build(job, token, str(tz))
-        if req.type == "scte":
-            return await scte_report.build(job, token, str(tz))
-        return await alarm_report.build(job, token, str(tz))
+        # Node names for the report header: "Main · Office", "Site 2 · Probe A"
+        names = {}
+        for sid, conn in conns.items():
+            names |= {(sid, n["nodeID"]): n["name"] for n in await mp_client.nodes(conn)}
+        for t in job.params["targets"]:
+            t["node"] = names.get((t["server_id"], t["node_id"]), str(t["node_id"]))
+        multi_server = len(conns) > 1
+        job.params["server"] = ", ".join(dict.fromkeys(
+            f'{t["server"]} · {t["node"]}' if multi_server else t["node"] for t in job.params["targets"]))
+        builder = {"measures": measure_report.build, "scte": scte_report.build}.get(req.type, alarm_report.build)
+        return await builder(job, conns, str(tz))
 
     return jobs.start(session.user_id, params, work)
 
@@ -309,6 +363,7 @@ async def api_report_start(req: ReportRequest, session: sessions.Session = Depen
 
 class ObjectsOverride(BaseModel):
     """Run a template (or a quick report) for other objects, e.g. a channel clicked on the overview."""
+    server_id: int = 0
     node_id: int
     object_ids: list[str] = Field(min_length=1)
     expand: bool = True  # also take everything inside these objects, as ticking them in the wizard does
@@ -317,7 +372,7 @@ class ObjectsOverride(BaseModel):
 async def _expand(session: sessions.Session, o: ObjectsOverride) -> list[str]:
     if not o.expand:
         return o.object_ids
-    objects = {x["monitoringObjectID"]: x for x in await mp_client.monitoring_objects(session.token, o.node_id)}
+    objects = {x["monitoringObjectID"]: x for x in await mp_client.monitoring_objects(session.conn(o.server_id), o.node_id)}
     ids: list[str] = []
     for oid in o.object_ids:
         ids += [i for i in overview.subtree(oid, objects) if i not in ids]
@@ -330,7 +385,8 @@ async def _expand(session: sessions.Session, o: ObjectsOverride) -> list[str]:
 async def api_report_quick(body: ObjectsOverride, kind: Literal["alarms"] = "alarms", hours: int = 24,
                            session: sessions.Session = Depends(current_session)):
     """One-click alarm report for a channel: all sections, last `hours`."""
-    req = ReportRequest(type=kind, node_id=body.node_id, object_ids=await _expand(session, body),
+    req = ReportRequest(type=kind, targets=[Target(server_id=body.server_id, node_id=body.node_id,
+                                                   object_ids=await _expand(session, body))],
                         period_hours=max(1, min(hours, 24 * 31)))
     return {"id": _start_report(req, session).id}
 
@@ -354,7 +410,8 @@ def _template_out(tpl: dict, session: sessions.Session) -> dict:
         "updated": tpl["updated"],
         "params": p,
         "type": p.get("type"),
-        "objects": len(p.get("object_ids") or []),
+        "objects": sum(len(t.get("object_ids") or []) for t in p.get("targets") or [])
+                   or len(p.get("object_ids") or []),
         "period_hours": p.get("period_hours"),
     }
 
@@ -428,7 +485,10 @@ async def api_template_run(template_id: int, body: ObjectsOverride | None = None
     params = dict(tpl["params"])
     name = tpl["name"]
     if body is not None:
-        params.update(node_id=body.node_id, object_ids=await _expand(session, body))
+        params.pop("node_id", None)
+        params.pop("object_ids", None)
+        params["targets"] = [{"server_id": body.server_id, "node_id": body.node_id,
+                              "object_ids": await _expand(session, body)}]
     req = ReportRequest.model_validate(params)
     return {"id": _start_report(req, session, name).id}
 
@@ -443,14 +503,14 @@ async def overview_page(request: Request, session: sessions.Session = Depends(cu
 
 @app.get("/api/overview/state")
 async def api_overview_state(session: sessions.Session = Depends(current_session)):
-    return await overview.current_state(session.token, _user_tz(session))
+    return await overview.current_state(list(session.conns.values()), _user_tz(session))
 
 
 @app.get("/api/overview/top")
 async def api_overview_top(hours: int = 24, session: sessions.Session = Depends(current_session)):
     if hours not in (1, 24, 168):
         raise HTTPException(422, "hours must be 1, 24 or 168")
-    return await overview.top_channels(session.token, session.user_id, hours, str(_user_tz(session)))
+    return await overview.top_channels(list(session.conns.values()), session.user_id, hours, str(_user_tz(session)))
 
 
 @app.get("/templates", response_class=HTMLResponse)
@@ -483,7 +543,7 @@ _SORT_KEYS = {
     "duration": lambda r: r.duration_sec,
     "priority": lambda r: r.priority,
     "alarm": lambda r: r.alarm.lower(),
-    "object": lambda r: r.object.lower(),
+    "object": lambda r: r.label.lower(),
     "stream": lambda r: r.stream.lower(),
 }
 
@@ -506,7 +566,7 @@ async def api_report_rows(
     rows = report.rows
     if q:
         needle = q.lower()
-        rows = [r for r in rows if needle in f"{r.alarm}\n{r.object}\n{r.stream}\n{r.condition}".lower()]
+        rows = [r for r in rows if needle in f"{r.alarm}\n{r.label}\n{r.stream}\n{r.condition}".lower()]
     if group:
         rows = [r for r in rows if r.group == group]
     if status in ("active", "finished"):
@@ -525,7 +585,7 @@ async def api_report_rows(
                 "alarm": r.alarm,
                 "condition": r.condition,
                 "stream": r.stream,
-                "object": r.object,
+                "object": r.label,
                 "node": r.node,
                 "detected": export.fmt_dt(r.detected),
                 "finished": export.fmt_dt(r.finished),
@@ -595,7 +655,7 @@ async def api_report_charts(job_id: str, session: sessions.Session = Depends(cur
             "total": len(series),
             "series": [
                 {
-                    "name": s.object,
+                    "name": s.label,
                     "stream": s.stream,
                     "avg": [[_wall_ms(p.time), s.d(p.avg)] for p in s.points],
                     "min": [[_wall_ms(p.time), s.d(p.min)] for p in s.points],
@@ -624,7 +684,7 @@ async def api_report_points(
     rows = [
         (s, p)
         for s in report.series
-        if (not measure or s.key == measure) and (not needle or needle in f"{s.object}\n{s.stream}".lower())
+        if (not measure or s.key == measure) and (not needle or needle in f"{s.label}\n{s.stream}".lower())
         for p in s.points
         if p.avg is not None
     ]
@@ -639,7 +699,7 @@ async def api_report_points(
             {
                 "time": export.fmt_dt(p.time),
                 "stream": s.stream,
-                "object": s.object,
+                "object": s.label,
                 "measure": s.measure,
                 "unit": s.display_unit,
                 "min": export.fmt_num(s.d(p.min), False, 3),
@@ -758,3 +818,113 @@ async def api_report_markers(
         "size": size,
         "rows": [export.scte_row(m, t) for m in rows[start : start + size]],
     }
+
+
+# --- MultiProbe servers -----------------------------------------------------------------------
+
+def _server_out(srv: dict, session: sessions.Session) -> dict:
+    conn = session.conns.get(srv["id"])
+    return {
+        "id": srv["id"], "name": srv["name"], "url": srv["url"], "verify_tls": srv["verify_tls"],
+        "main": srv["id"] == sessions.MAIN_SERVER,
+        "connected": conn is not None, "login": session.logins.get(srv["id"]) if conn else None,
+        "added_by": srv.get("created_by_name", ""),
+        "mine": srv.get("created_by") == session.user_id,
+    }
+
+
+@app.get("/servers", response_class=HTMLResponse)
+async def servers_page(request: Request, session: sessions.Session = Depends(current_session)):
+    lang = i18n.pick_lang(request)
+    return render(request, "servers.html", session=session, strings=i18n.bundle(lang))
+
+
+@app.get("/api/servers")
+async def api_servers(session: sessions.Session = Depends(current_session)):
+    main = {"id": sessions.MAIN_SERVER, "name": settings.main_server_name, "url": settings.mp_api_url,
+            "verify_tls": True, "created_by_name": ""}
+    return [_server_out(main, session)] + [_server_out(s, session) for s in storage.list_servers()]
+
+
+class ServerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    url: str = Field(min_length=8, max_length=300)
+    verify_tls: bool = True
+
+
+def _clean_url(url: str) -> str:
+    """scheme://host:port only. The MultiProbe API lives at the root (/api/...), so a link to a page of
+    the web interface (http://host:2020/conf/presets/137) is cut down to http://host:2020."""
+    parts = urlsplit(url.strip())
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        raise HTTPException(422, "The address must start with http:// or https://")
+    url = f"{parts.scheme.lower()}://{parts.netloc}"
+    if url == settings.mp_api_url:
+        raise HTTPException(422, "This is the main server")
+    return url
+
+
+@app.post("/api/servers")
+async def api_server_create(body: ServerIn, session: sessions.Session = Depends(current_session)):
+    url = _clean_url(body.url)
+    if any(s["url"] == url for s in storage.list_servers()):
+        raise HTTPException(409, "This server is already in the list")
+    return {"id": storage.create_server(body.name.strip(), url, body.verify_tls, session.user_id, session.user_name)}
+
+
+@app.put("/api/servers/{server_id}")
+async def api_server_update(server_id: int, body: ServerIn, session: sessions.Session = Depends(current_session)):
+    if not storage.update_server(server_id, body.name.strip(), _clean_url(body.url), body.verify_tls):
+        raise HTTPException(404, "Server not found")
+    session.conns.pop(server_id, None)  # the address may have changed: sign in again
+    return {"id": server_id}
+
+
+@app.delete("/api/servers/{server_id}")
+async def api_server_delete(server_id: int, session: sessions.Session = Depends(current_session)):
+    srv = storage.get_server(server_id)
+    if srv is None:
+        raise HTTPException(404, "Server not found")
+    if srv["created_by"] != session.user_id:
+        raise HTTPException(403, "Only the user who added the server can remove it")
+    storage.delete_server(server_id)
+    session.conns.pop(server_id, None)
+    return {"ok": True}
+
+
+class ConnectIn(BaseModel):
+    login: str = Field(min_length=1)
+    password: str
+
+
+@app.post("/api/servers/{server_id}/connect")
+async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
+                             session: sessions.Session = Depends(current_session)):
+    """Sign in to another MultiProbe server with an account of that server. The password is not kept."""
+    srv = storage.get_server(server_id)
+    if srv is None:
+        raise HTTPException(404, "Server not found")
+    t = i18n.translator(i18n.pick_lang(request))
+    try:
+        token, _profile = await mp_client.login(srv["url"], body.login, body.password, srv["verify_tls"])
+    except mp_client.MPAuthError as exc:
+        msg = {"authErrorUserDisabled": t("err_user_disabled"), "authErrorUserBanned": t("err_user_banned")}.get(
+            exc.code, t("err_wrong_credentials"))
+        raise HTTPException(401, msg)
+    except mp_client.MPError as exc:
+        if exc.status in (404, 405) and "<html" in exc.message.lower():
+            # A web server answered, not the MultiProbe API (e.g. nginx serving the web interface).
+            raise HTTPException(502, t("err_not_api", url=srv["url"]))
+        raise HTTPException(502, t("err_server_unreachable", msg=exc.message[:200]))
+    session.conns[server_id] = mp_client.Conn(server_id, srv["name"], srv["url"], token, srv["verify_tls"])
+    session.logins[server_id] = body.login
+    return {"ok": True}
+
+
+@app.post("/api/servers/{server_id}/disconnect")
+async def api_server_disconnect(server_id: int, session: sessions.Session = Depends(current_session)):
+    if server_id == sessions.MAIN_SERVER:
+        raise HTTPException(422, "Sign out to leave the main server")
+    session.conns.pop(server_id, None)
+    session.logins.pop(server_id, None)
+    return {"ok": True}

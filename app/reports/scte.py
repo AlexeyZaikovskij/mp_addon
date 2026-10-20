@@ -144,38 +144,47 @@ def scte_objects(selected: set[str], objects: dict[str, dict]) -> list[str]:
     ]
 
 
-async def build(job: Job, token: str, time_zone: str) -> ScteReport:
+async def build(job: Job, conns: dict, time_zone: str) -> ScteReport:
+    from .alarms import is_multi, target_label
     p = job.params
     tz = ZoneInfo(time_zone)
     begin = datetime.fromisoformat(p["period_utc"][0])
     end = min(datetime.fromisoformat(p["period_utc"][1]), datetime.now(timezone.utc))
-    objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(token, p["node_id"])}
-    oids = scte_objects(set(p["object_ids"]), objects)
-    catalog = await mp_client.measure_catalog(token)
-    columns = [m["columnName"] for m in (catalog.get(SCTE_ANALYZER) or {}).get("measureItemList") or []]
-    job.total_steps = 1
-
+    multi = is_multi(p["targets"])
+    job.total_steps = len(p["targets"])
     markers: list[Marker] = []
-    if oids and columns:
-        items = await mp_client.measure_data(
-            token, SCTE_ANALYZER, oids, columns,
-            begin.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            {"forceDisableInterpolation": True},
-        )
-        for it in items:
-            for d in it.get("dataList") or []:
-                m = _marker(d, it.get("monitoringObjectID"), objects, tz)
-                if m and (p.get("scte_include_null") or m.command_type != 0x00):
-                    markers.append(m)
-    job.done_steps = 1
-    job.rows_fetched = len(markers)
+    decoders: list[dict] = []
+    for t in p["targets"]:
+        conn = conns[t["server_id"]]
+        objects = {o["monitoringObjectID"]: o for o in await mp_client.monitoring_objects(conn, t["node_id"])}
+        oids = scte_objects(set(t["object_ids"]), objects)
+        catalog = await mp_client.measure_catalog(conn)
+        columns = [m["columnName"] for m in (catalog.get(SCTE_ANALYZER) or {}).get("measureItemList") or []]
+        label = target_label(t, multi)
+        if oids and columns:
+            items = await mp_client.measure_data(
+                conn, SCTE_ANALYZER, oids, columns,
+                begin.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                {"forceDisableInterpolation": True},
+            )
+            for it in items:
+                for d in it.get("dataList") or []:
+                    m = _marker(d, it.get("monitoringObjectID"), objects, tz)
+                    if m and (p.get("scte_include_null") or m.command_type != 0x00):
+                        if label:  # keep streams of different servers apart
+                            m.stream = f"{label} · {m.stream}"
+                        markers.append(m)
+        for o in oids:
+            name, stream = _label(o, objects)
+            decoders.append({"id": o, "name": name, "stream": f"{label} · {stream}" if label else stream})
+        job.done_steps += 1
+        job.rows_fetched = len(markers)
     markers.sort(key=lambda m: (m.time, m.object))
 
     report = ScteReport(
         params=p,
         markers=markers,
-        objects=sorted(({"id": o, "name": _label(o, objects)[0], "stream": _label(o, objects)[1]} for o in oids),
-                       key=lambda x: (x["stream"].lower(), x["name"].lower())),
+        objects=sorted(decoders, key=lambda x: (x["stream"].lower(), x["name"].lower())),
         period=(begin.astimezone(tz), end.astimezone(tz)),
     )
     report.breaks = _breaks(markers, end.astimezone(tz))

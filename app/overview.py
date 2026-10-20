@@ -58,17 +58,41 @@ def _stream_of(oid: str, objects: dict[str, dict]) -> str:
     return "" if cur is None or cur["monitoringObjectID"] == oid else cur.get("name") or ""
 
 
-async def _all_objects(token: str) -> tuple[list[dict], dict[str, dict]]:
-    nodes = await mp_client.nodes(token)
-    lists = await asyncio.gather(*(mp_client.monitoring_objects(token, n["nodeID"]) for n in nodes))
+async def _all_objects(conn) -> tuple[list[dict], dict[str, dict]]:
+    nodes = await mp_client.nodes(conn)
+    lists = await asyncio.gather(*(mp_client.monitoring_objects(conn, n["nodeID"]) for n in nodes))
     objects = {o["monitoringObjectID"]: o for items in lists for o in items}
     return nodes, objects
 
 
-async def current_state(token: str, tz) -> dict[str, Any]:
-    nodes, objects = await _all_objects(token)
+ORDER = {"error": 0, "warning": 1, "caution": 2, "ok": 3}
+
+
+async def current_state(conns: list, tz) -> dict[str, Any]:
+    """State of every channel on every connected server. A server that fails is reported, not fatal."""
+    results = await asyncio.gather(*(_server_state(c, tz) for c in conns), return_exceptions=True)
+    channels, streams, nodes, errors = [], [], [], []
+    for conn, res in zip(conns, results):
+        if isinstance(res, Exception):
+            errors.append({"server_id": conn.server_id, "server": conn.name, "message": str(res)[:200]})
+            continue
+        channels += res["channels"]
+        streams += res["streams"]
+        nodes += res["nodes"]
+    channels.sort(key=lambda c: (ORDER[c["state"]], -(c["since_sec"] or 0), c["name"].lower()))
+    streams.sort(key=lambda s: (ORDER[s["state"]], s["name"].lower()))
+    return {
+        "updated": datetime.now(timezone.utc).astimezone(tz).strftime("%H:%M:%S"),
+        "counts": {s: sum(1 for c in channels if c["state"] == s) for s in ("ok", "caution", "warning", "error")},
+        "channels": channels, "streams": streams, "nodes": nodes, "errors": errors,
+        "servers": [{"id": c.server_id, "name": c.name} for c in conns],
+    }
+
+
+async def _server_state(conn, tz) -> dict[str, Any]:
+    nodes, objects = await _all_objects(conn)
     now = datetime.now(timezone.utc)
-    page = await mp_client.call(token, "POST", "/api/Alarm/MonitoringObjectLog/Find", {"dataFilter": {
+    page = await mp_client.call(conn, "POST", "/api/Alarm/MonitoringObjectLog/Find", {"dataFilter": {
         "beginDate": (now - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "endDate": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "isActive": True,
@@ -80,10 +104,11 @@ async def current_state(token: str, tz) -> dict[str, Any]:
         if r.get("isActive"):
             active.setdefault((r.get("objectAnalyzerLogID"), r.get("monitoringObjectID"), r.get("alarmID")), r)
 
+    base = {"server_id": conn.server_id, "server": conn.name}
     channels: dict[str, dict] = {}
     for oid, o in objects.items():
         if o.get("objectKind") in SERVICE_KINDS and reportable(o):
-            channels[oid] = {"id": oid, "name": o.get("name") or "", "stream": _stream_of(oid, objects),
+            channels[oid] = {**base, "id": oid, "name": o.get("name") or "", "stream": _stream_of(oid, objects),
                              "node_id": o.get("nodeID"), "node": o.get("nodeName") or "",
                              "priority": None, "alarms": [], "since": None}
     streams: dict[str, dict] = {}
@@ -97,7 +122,8 @@ async def current_state(token: str, tz) -> dict[str, Any]:
         target = channels.get(owner) if owner else None
         if target is None:  # stream / transport level
             o = objects[oid]
-            target = streams.setdefault(oid, {"id": oid, "name": o.get("name") or "", "kind": o.get("objectKindName") or "",
+            target = streams.setdefault(oid, {**base, "id": oid, "name": o.get("name") or "",
+                                              "kind": o.get("objectKindName") or "",
                                               "stream": _stream_of(oid, objects), "node_id": o.get("nodeID"),
                                               "priority": None, "alarms": [], "since": None})
         target["priority"] = max(prio, target["priority"] or 0)
@@ -108,25 +134,21 @@ async def current_state(token: str, tz) -> dict[str, Any]:
             target["since"] = since
 
     def out(item: dict) -> dict:
-        state = state_of(item["priority"])
         since = item["since"]
-        return {**item, "state": state,
+        return {**item, "state": state_of(item["priority"]),
                 "since": since.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S") if since else None,
                 "since_sec": int((now - since).total_seconds()) if since else None}
 
-    chan = [out(c) for c in channels.values()]
-    order = {"error": 0, "warning": 1, "caution": 2, "ok": 3}
-    chan.sort(key=lambda c: (order[c["state"]], -(c["since_sec"] or 0), c["name"].lower()))
-    counts = {s: sum(1 for c in chan if c["state"] == s) for s in ("ok", "caution", "warning", "error")}
-    stream_list = sorted((out(s) for s in streams.values() if state_of(s["priority"]) != "ok"),
-                         key=lambda s: (order[s["state"]], s["name"].lower()))
-    return {"updated": now.astimezone(tz).strftime("%H:%M:%S"), "counts": counts, "channels": chan,
-            "streams": stream_list, "nodes": [{"id": n["nodeID"], "name": n["name"]} for n in nodes]}
+    return {
+        "channels": [out(c) for c in channels.values()],
+        "streams": [out(x) for x in streams.values() if state_of(x["priority"]) != "ok"],
+        "nodes": [{**base, "id": n["nodeID"], "name": n["name"]} for n in nodes],
+    }
 
 
-async def top_channels(token: str, user_id: str, hours: int, tz_name: str, limit: int = 15) -> dict[str, Any]:
+async def top_channels(conns: list, user_id: str, hours: int, tz_name: str, limit: int = 15) -> dict[str, Any]:
     """Channels ranked by outage time over the last `hours`, from the same calculation as the report."""
-    key = (settings.mp_api_url, user_id, hours)
+    key = (user_id, hours, tuple(sorted((c.server_id, c.url) for c in conns)))
     hit = _top_cache.get(key)
     if hit and time.monotonic() - hit[0] < TOP_CACHE_TTL:
         return hit[1]
@@ -135,28 +157,34 @@ async def top_channels(token: str, user_id: str, hours: int, tz_name: str, limit
         hit = _top_cache.get(key)
         if hit and time.monotonic() - hit[0] < TOP_CACHE_TTL:
             return hit[1]
-        nodes, objects = await _all_objects(token)
         end = datetime.now(timezone.utc).replace(microsecond=0)
         begin = end - timedelta(hours=hours)
-        rows = []
-        for n in nodes:
-            ids = [oid for oid, o in objects.items() if o.get("nodeID") == n["nodeID"] and reportable(o)]
-            if not ids:
-                continue
-            job = Job(id="overview", owner=user_id, params={
-                "node_id": n["nodeID"], "object_ids": ids, "alarm_exclude": [],
-                "period_utc": [begin.isoformat(), end.isoformat()],
-            })
-            report = await alarm_report.build(job, token, tz_name)
-            for a in report.availability:
-                if a.kind in SERVICE_KINDS and (a.outage_sec or a.degraded_sec):
-                    rows.append({"id": a.object_id, "name": a.name, "stream": _stream_of(a.object_id, objects),
-                                 "node_id": n["nodeID"], "outage_sec": a.outage_sec, "degraded_sec": a.degraded_sec,
-                                 "availability": a.availability, "incidents": a.incidents,
-                                 "longest_sec": a.longest_sec})
+        rows, errors = [], []
+        for conn in conns:
+            try:
+                nodes, objects = await _all_objects(conn)
+                for n in nodes:
+                    ids = [oid for oid, o in objects.items() if o.get("nodeID") == n["nodeID"] and reportable(o)]
+                    if not ids:
+                        continue
+                    job = Job(id="overview", owner=user_id, params={
+                        "targets": [{"server_id": conn.server_id, "server": conn.name, "node_id": n["nodeID"],
+                                     "node": n["name"], "object_ids": ids}],
+                        "alarm_exclude": [], "period_utc": [begin.isoformat(), end.isoformat()],
+                    })
+                    report = await alarm_report.build(job, {conn.server_id: conn}, tz_name)
+                    for a in report.availability:
+                        if a.kind in SERVICE_KINDS and (a.outage_sec or a.degraded_sec):
+                            rows.append({"server_id": conn.server_id, "server": conn.name, "id": a.object_id,
+                                         "name": a.name, "stream": _stream_of(a.object_id, objects),
+                                         "node_id": n["nodeID"], "outage_sec": a.outage_sec,
+                                         "degraded_sec": a.degraded_sec, "availability": a.availability,
+                                         "incidents": a.incidents, "longest_sec": a.longest_sec})
+            except mp_client.MPError as exc:
+                errors.append({"server_id": conn.server_id, "server": conn.name, "message": exc.message[:200]})
         rows.sort(key=lambda r: (-r["outage_sec"], -r["degraded_sec"], r["name"].lower()))
         result = {"hours": hours, "period_sec": hours * 3600, "rows": rows[:limit], "total_with_problems": len(rows),
-                  "calculated": datetime.now(timezone.utc).isoformat()}
+                  "errors": errors, "calculated": datetime.now(timezone.utc).isoformat()}
         _top_cache[key] = (time.monotonic(), result)
         return result
 

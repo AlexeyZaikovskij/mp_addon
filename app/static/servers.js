@@ -3,6 +3,7 @@
   const T = window.I18N;
   const $ = (sel) => document.querySelector(sel);
   let servers = [];
+  let isAdmin = false;
   let connecting = null;
 
   const escapeHtml = (s) =>
@@ -12,7 +13,7 @@
     const resp = await fetch(path, {
       method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined,
     });
-    if (resp.status === 401 && path === "/api/servers") { location.href = "/login"; throw new Error("session"); }
+    if (resp.status === 401) { location.href = "/login"; throw new Error("session"); }
     const data = await resp.json();
     if (!resp.ok) {
       const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join("; ") : data.detail;
@@ -31,24 +32,28 @@
   function render() {
     $("#srv-rows").innerHTML = servers.map((s) => `
       <tr data-id="${s.id}">
-        <td><b>${escapeHtml(s.name)}</b>${s.main ? ` <span class="tag">${escapeHtml(T.srv_main)}</span>` : ""}
+        <td><b>${escapeHtml(s.name)}</b>
           ${s.added_by ? `<div class="muted small">${escapeHtml(T.srv_added_by)}: ${escapeHtml(s.added_by)}</div>` : ""}</td>
         <td class="mono">${escapeHtml(s.url)}${s.verify_tls ? "" : ` <span class="tag warn">${escapeHtml(T.srv_insecure_tag)}</span>`}</td>
         <td>${s.connected
           ? `<span class="srv-on">● ${escapeHtml(T.srv_connected)}</span> <span class="muted">${escapeHtml(s.login || "")}</span>`
           : `<span class="muted">○ ${escapeHtml(T.srv_not_connected)}</span>`}</td>
         <td class="actions-cell">
-          ${s.main ? "" : s.connected
+          ${s.connected
             ? `<button type="button" class="link" data-act="disconnect">${escapeHtml(T.srv_disconnect)}</button>`
             : `<button type="button" class="btn small primary-btn" data-act="connect">${escapeHtml(T.srv_connect)}</button>`}
-          ${s.main ? "" : `<button type="button" class="link" data-act="edit">${escapeHtml(T.tpl_edit)}</button>`}
-          ${s.mine ? `<button type="button" class="link danger" data-act="delete">${escapeHtml(T.tpl_delete)}</button>` : ""}
+          ${isAdmin ? `<button type="button" class="link" data-act="edit">${escapeHtml(T.tpl_edit)}</button>
+            <button type="button" class="link danger" data-act="delete">${escapeHtml(T.tpl_delete)}</button>` : ""}
         </td>
       </tr>`).join("");
   }
 
   async function reload() {
-    servers = await api("/api/servers");
+    const data = await api("/api/servers");
+    servers = data.servers;
+    isAdmin = data.is_admin;
+    $("#add").hidden = !isAdmin;
+    $("#srv-empty").hidden = servers.length > 0;
     render();
   }
 

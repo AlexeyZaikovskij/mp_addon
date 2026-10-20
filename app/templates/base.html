@@ -22,6 +22,7 @@
           <a href="/reports" class="{{ 'active' if path.startswith('/report') }}">{{ t("nav_reports") }}</a>
           <a href="/templates" class="{{ 'active' if path == '/templates' }}">{{ t("nav_templates") }}</a>
           <a href="/servers" class="{{ 'active' if path == '/servers' }}">{{ t("nav_servers") }}</a>
+          {% if session.is_admin %}<a href="/users" class="{{ 'active' if path == '/users' }}">{{ t("nav_users") }}</a>{% endif %}
         </nav>
         {% if session.conns | length > 1 %}
         <label class="scope" title="{{ t('scope_hint') }}">{{ t("scope_label") }}
@@ -42,7 +43,7 @@
           });
         </script>
         {% endif %}
-        <span class="user" title="{{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</span>
+        <a class="user" href="/account" title="{{ t('nav_account') }} · {{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</a>
         <form method="post" action="/logout"><button class="link">{{ t("sign_out") }}</button></form>
       {% endif %}
     </div>

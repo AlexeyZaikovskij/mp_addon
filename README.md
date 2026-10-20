@@ -2,8 +2,11 @@
 
 A web toolkit for MultiProbe: a live overview of all channels, reports (alarm history, measurements,
 SCTE-35 markers) with CSV/XML/PDF export and templates, across one or several independent MultiProbe servers.
-Users sign in with an account of the main server (config.env) and may connect to more servers with
-their own accounts of those servers; the data comes from the MultiProbe REST API.
+
+Users sign in with **Toolkit accounts**. The first start opens "Create the administrator" (only in a browser
+on the computer running the Toolkit). Administrators manage Toolkit users and the list of MultiProbe
+servers; every user connects to those servers with accounts of the servers themselves (passwords are not
+stored, connections last for the session). The server in `MP_API_URL` is put into the list on the first run.
 
 ## Run (development)
 
@@ -27,6 +30,7 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/mp_client.py` | MultiProbe API client |
 | `app/storage.py` | Report templates (SQLite in `data/addon.db`, set `DATA_DIR` to move it) |
 | `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
+| `app/auth.py` | Toolkit passwords (scrypt) and the lock-out after failed sign-ins |
 | `app/sessions.py` | Server-side sessions (the MP token never reaches the browser) |
 | `app/i18n.py` | EN/RU strings |
 | `app/templates/`, `app/static/` | Pages, styles, wizard script (no CDN — works offline) |
@@ -46,4 +50,5 @@ when a file under `app/` changes, and listens on localhost only.
 4a. ✅ SCTE-35 marker report: markers, ad breaks per profile, timeline, markers missing on some profiles; CSV/XML/PDF
 4b. ✅ MultiProbe Toolkit: overview page (channel states now, most problematic channels, one click to a report)
 4c. ✅ Several independent MultiProbe servers: shared server list, per-user sign-in, reports and overview across servers
+4d. ✅ Toolkit's own users and roles (administrator / user), first-run setup, account page
 5. Windows service + offline installer

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card login-card setup-card">
+  <h1>{{ t("setup_title") }}</h1>
+  <p class="muted">{{ t("setup_hint") }}</p>
+  {% if not local %}
+  <div class="error">{{ t("setup_local_only") }}</div>
+  {% else %}
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" action="/setup" autocomplete="off">
+    <label>{{ t("login") }} <input name="login" value="{{ login_name }}" required autofocus></label>
+    <label>{{ t("user_name") }} <input name="name" value="{{ admin_name }}"></label>
+    <label>{{ t("password") }} <input name="password" type="password" autocomplete="new-password" required></label>
+    <label>{{ t("password_repeat") }} <input name="password2" type="password" autocomplete="new-password" required></label>
+    <button class="primary">{{ t("setup_create") }}</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

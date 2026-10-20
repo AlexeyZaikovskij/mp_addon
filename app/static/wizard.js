@@ -49,6 +49,9 @@
         ${list.map((n) => `<label class="inline"><input type="checkbox" data-node="${nodeKey(n.server_id, n.id)}"
             ${checkedNodes.has(nodeKey(n.server_id, n.id)) ? "checked" : ""}> ${escapeHtml(n.name)}</label>`).join("")}
       </div>`).join("") : `<p class="muted">—</p>`;
+    if (!data.connected) {
+      $("#nodes").innerHTML = `<p class="notice">${escapeHtml(T.no_servers_connected)} <a class="link" href="/servers">${escapeHtml(T.nav_servers)} →</a></p>`;
+    }
     $("#node-errors").innerHTML = data.errors.map((e) =>
       `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
     if (nodesAll.length === 1 && !checkedNodes.size) {

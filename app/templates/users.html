@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h1>{{ t("nav_users") }}</h1>
+    <button type="button" class="btn" id="add">+ {{ t("users_add") }}</button>
+  </div>
+  <p class="muted">{{ t("users_hint") }}</p>
+
+  <form class="srv-form" id="user-form" hidden autocomplete="off">
+    <input type="hidden" id="u-id">
+    <label>{{ t("login") }} <input id="u-login" maxlength="100" autocomplete="off"></label>
+    <label>{{ t("user_name") }} <input id="u-name" maxlength="100"></label>
+    <label>{{ t("users_role") }}
+      <select id="u-role"><option value="user">{{ t("role_user") }}</option><option value="admin">{{ t("role_admin") }}</option></select>
+    </label>
+    <label><span id="u-password-label">{{ t("password") }}</span> <input id="u-password" type="password" autocomplete="new-password"></label>
+    <label class="inline" id="u-disabled-row"><input type="checkbox" id="u-disabled"> {{ t("users_disabled") }}</label>
+    <div class="srv-form-actions">
+      <button type="submit" class="primary">{{ t("tpl_save") }}</button>
+      <button type="button" class="link" id="u-cancel">{{ t("cancel") }}</button>
+    </div>
+  </form>
+
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr>
+        <th>{{ t("login") }}</th><th>{{ t("user_name") }}</th><th>{{ t("users_role") }}</th>
+        <th>{{ t("users_last_login") }}</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="muted">{{ t("loading") }}</td></tr></tbody>
+    </table>
+  </div>
+  <div id="message" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/users.js?v={{ static_version() }}"></script>
+{% endblock %}

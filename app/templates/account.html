@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>{{ t("nav_account") }}</h1>
+  <p class="muted">{{ t("login") }}: <b>{{ session.user.login }}</b> · {{ t("users_role") }}:
+    {{ t("role_admin") if session.is_admin else t("role_user") }}</p>
+  <form class="srv-form" id="profile-form">
+    <label>{{ t("user_name") }} <input id="a-name" value="{{ session.user_name }}" maxlength="100" required></label>
+    <label>{{ t("time_zone") }}
+      <select id="a-tz">
+        {% for z in zones %}<option value="{{ z }}" {{ "selected" if z == session.time_zone }}>{{ z }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="srv-form-actions"><button type="submit" class="primary">{{ t("tpl_save") }}</button></div>
+  </form>
+  <p class="muted note">{{ t("account_tz_hint") }}</p>
+</section>
+
+<section class="card">
+  <h2>{{ t("account_password") }}</h2>
+  <form class="srv-form" id="password-form" autocomplete="off">
+    <label>{{ t("account_current_password") }} <input id="p-current" type="password" autocomplete="current-password" required></label>
+    <label>{{ t("users_new_password") }} <input id="p-new" type="password" autocomplete="new-password" required></label>
+    <label>{{ t("password_repeat") }} <input id="p-new2" type="password" autocomplete="new-password" required></label>
+    <div class="srv-form-actions"><button type="submit" class="primary">{{ t("account_change_password") }}</button></div>
+  </form>
+  <div id="message" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/account.js?v={{ static_version() }}"></script>
+{% endblock %}

@@ -8,7 +8,73 @@ LANG_COOKIE = "mpr_lang"
 
 STRINGS: dict[str, dict[str, str]] = {
     "app_title": {"en": "MultiProbe Toolkit", "ru": "MultiProbe Toolkit"},
-    "login_title": {"en": "Sign in with your MultiProbe account", "ru": "Вход под учётной записью MultiProbe"},
+    "login_title": {"en": "Sign in to MultiProbe Toolkit", "ru": "Вход в MultiProbe Toolkit"},
+    "setup_title": {"en": "Create the administrator", "ru": "Создание администратора"},
+    "setup_hint": {
+        "en": "First start of the Toolkit: create the administrator account. The administrator adds MultiProbe "
+              "servers and Toolkit users.",
+        "ru": "Первый запуск Toolkit: создайте учётную запись администратора. Администратор добавляет серверы "
+              "MultiProbe и пользователей Toolkit.",
+    },
+    "setup_local_only": {
+        "en": "For security the administrator can only be created in a browser on the computer that runs the Toolkit (http://localhost:…).",
+        "ru": "В целях безопасности администратора можно создать только в браузере на компьютере, где запущен Toolkit (http://localhost:…).",
+    },
+    "setup_create": {"en": "Create and sign in", "ru": "Создать и войти"},
+    "user_name": {"en": "Name", "ru": "Имя"},
+    "password_repeat": {"en": "Repeat the password", "ru": "Повторите пароль"},
+    "err_locked": {
+        "en": "Too many failed attempts. Try again in {min} min.",
+        "ru": "Слишком много неудачных попыток. Попробуйте через {min} мин.",
+    },
+    "err_login_required": {"en": "Enter a login.", "ru": "Введите логин."},
+    "err_password_short": {"en": "The password must have at least {n} characters.", "ru": "Пароль должен быть не короче {n} символов."},
+    "err_password_mismatch": {"en": "The passwords do not match.", "ru": "Пароли не совпадают."},
+    "err_login_taken": {"en": "This login is already in use.", "ru": "Такой логин уже есть."},
+    "err_last_admin": {"en": "There must stay at least one active administrator.", "ru": "Должен остаться хотя бы один активный администратор."},
+    "err_delete_self": {"en": "You cannot delete yourself.", "ru": "Нельзя удалить самого себя."},
+    "err_current_password": {"en": "The current password is wrong.", "ru": "Текущий пароль неверен."},
+    "err_no_servers": {"en": "Connect to a MultiProbe server first.", "ru": "Сначала подключитесь к серверу MultiProbe."},
+    "no_servers_connected": {
+        "en": "You are not connected to any MultiProbe server yet.",
+        "ru": "Вы пока не подключены ни к одному серверу MultiProbe.",
+    },
+    "nav_users": {"en": "Users", "ru": "Пользователи"},
+    "nav_account": {"en": "My account", "ru": "Моя учётная запись"},
+    "users_add": {"en": "Add user", "ru": "Добавить пользователя"},
+    "users_hint": {
+        "en": "Toolkit accounts. Administrators manage users and the server list; users connect to the servers "
+              "and work with reports. To read data, everyone also needs an account of each MultiProbe server.",
+        "ru": "Учётные записи Toolkit. Администраторы управляют пользователями и списком серверов, пользователи "
+              "подключаются к серверам и работают с отчётами. Для чтения данных каждому также нужна учётная запись "
+              "на каждом сервере MultiProbe.",
+    },
+    "users_role": {"en": "Role", "ru": "Роль"},
+    "role_admin": {"en": "Administrator", "ru": "Администратор"},
+    "role_user": {"en": "User", "ru": "Пользователь"},
+    "users_disabled": {"en": "Disabled (cannot sign in)", "ru": "Отключён (не может войти)"},
+    "users_disabled_tag": {"en": "disabled", "ru": "отключён"},
+    "users_you": {"en": "you", "ru": "вы"},
+    "users_last_login": {"en": "Last sign-in", "ru": "Последний вход"},
+    "users_new_password": {"en": "New password (leave empty to keep)", "ru": "Новый пароль (пусто — не менять)"},
+    "users_saved": {"en": "Saved.", "ru": "Сохранено."},
+    "users_delete_confirm": {"en": "Delete user “{name}”?", "ru": "Удалить пользователя «{name}»?"},
+    "account_tz_hint": {
+        "en": "Report periods and times are shown in this time zone. Until you pick one, it is taken from the first MultiProbe server you connect to.",
+        "ru": "Периоды и время в отчётах показываются в этом часовом поясе. Пока он не выбран, берётся из первого сервера MultiProbe, к которому вы подключились.",
+    },
+    "account_password": {"en": "Change password", "ru": "Смена пароля"},
+    "account_current_password": {"en": "Current password", "ru": "Текущий пароль"},
+    "account_change_password": {"en": "Change password", "ru": "Сменить пароль"},
+    "account_password_changed": {"en": "The password has been changed.", "ru": "Пароль изменён."},
+    "srv_empty_admin": {
+        "en": "No servers yet. Add a MultiProbe server with “Add server”.",
+        "ru": "Серверов пока нет. Добавьте сервер MultiProbe кнопкой «Добавить сервер».",
+    },
+    "srv_empty_user": {
+        "en": "No servers yet. Ask an administrator to add the MultiProbe servers.",
+        "ru": "Серверов пока нет. Попросите администратора добавить серверы MultiProbe.",
+    },
     "login": {"en": "Login", "ru": "Логин"},
     "password": {"en": "Password", "ru": "Пароль"},
     "sign_in": {"en": "Sign in", "ru": "Войти"},
@@ -99,10 +165,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "err_server_unavailable": {"en": "Server “{name}” did not answer", "ru": "Сервер «{name}» не ответил"},
     "srv_add": {"en": "Add server", "ru": "Добавить сервер"},
     "srv_hint": {
-        "en": "Independent MultiProbe installations. Every user sees this list and connects to each server with "
-              "an account of that server; passwords are not stored, only the session.",
-        "ru": "Независимые установки MultiProbe. Список общий для всех пользователей, а подключается каждый своей "
-              "учётной записью этого сервера; пароли не хранятся — только сессия.",
+        "en": "MultiProbe installations the Toolkit works with (managed by administrators). Connect to each with an "
+              "account of that MultiProbe server; the password is not stored, the connection lasts for your session.",
+        "ru": "Установки MultiProbe, с которыми работает Toolkit (список ведут администраторы). Подключайтесь к каждой "
+              "учётной записью этого сервера MultiProbe; пароль не хранится, подключение действует до конца сессии.",
     },
     "srv_name": {"en": "Name", "ru": "Название"},
     "srv_name_ph": {"en": "e.g. Site 2", "ru": "например, Площадка 2"},

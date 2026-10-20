@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import i18n, jobs, mp_client, overview, sessions, storage
+from . import auth, i18n, jobs, mp_client, overview, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -57,11 +57,8 @@ async def _session_expired(request: Request, _: SessionExpired):
 
 @app.exception_handler(mp_client.MPError)
 async def _mp_error(request: Request, exc: mp_client.MPError):
-    if isinstance(exc, mp_client.MPAuthError):
-        if exc.server_id in (None, sessions.MAIN_SERVER):
-            sessions.drop(request.cookies.get(sessions.COOKIE_NAME))
-            return await _session_expired(request, SessionExpired())
-        # Another server no longer accepts the token: disconnect just that one.
+    if isinstance(exc, mp_client.MPAuthError) and exc.server_id is not None:
+        # The server no longer accepts the token: disconnect just that one, the Toolkit session stays.
         session = sessions.get(request.cookies.get(sessions.COOKIE_NAME))
         if session:
             session.conns.pop(exc.server_id, None)
@@ -72,8 +69,11 @@ async def _mp_error(request: Request, exc: mp_client.MPError):
 @app.exception_handler(sessions.NotConnected)
 async def _not_connected(request: Request, exc: sessions.NotConnected):
     t = i18n.translator(i18n.pick_lang(request))
-    server = storage.get_server(exc.server_id) or {}
-    message = t("err_not_connected", name=server.get("name") or f"#{exc.server_id}")
+    if exc.server_id is None:
+        message = t("err_no_servers")
+    else:
+        server = storage.get_server(exc.server_id) or {}
+        message = t("err_not_connected", name=server.get("name") or f"#{exc.server_id}")
     if request.url.path.startswith("/api/"):
         return JSONResponse({"error": "not_connected", "server_id": exc.server_id, "message": message}, status_code=409)
     return RedirectResponse("/servers", status_code=303)
@@ -86,6 +86,12 @@ def current_session(request: Request) -> sessions.Session:
     return session
 
 
+def admin_session(session: sessions.Session = Depends(current_session)) -> sessions.Session:
+    if not session.is_admin:
+        raise HTTPException(403, "Only an administrator can do this")
+    return session
+
+
 def render(request: Request, name: str, **context) -> HTMLResponse:
     lang = i18n.pick_lang(request)
     return templates.TemplateResponse(
@@ -95,34 +101,72 @@ def render(request: Request, name: str, **context) -> HTMLResponse:
 
 # --- Pages ------------------------------------------------------------------
 
+def _signed_in(user: dict, to: str) -> RedirectResponse:
+    storage.update_user(user["id"], last_login=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    response = RedirectResponse(to, status_code=303)
+    response.set_cookie(sessions.COOKIE_NAME, sessions.create(user), httponly=True, samesite="lax")
+    return response
+
+
+def _is_local(request: Request) -> bool:
+    return (request.client.host if request.client else "") in ("127.0.0.1", "::1", "localhost")
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    if storage.count_users() == 0:
+        return RedirectResponse("/setup", status_code=303)
     return render(request, "login.html", error=None, login_name="")
 
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request, login: str = Form(...), password: str = Form(...)):
     t = i18n.translator(i18n.pick_lang(request))
-    try:
-        token, profile = await mp_client.login(settings.mp_api_url, login, password)
-    except mp_client.MPAuthError as exc:
-        error = {
-            "authErrorUserDisabled": t("err_user_disabled"),
-            "authErrorUserBanned": t("err_user_banned"),
-        }.get(exc.code, t("err_wrong_credentials"))
+    wait = auth.locked_for(login)
+    if wait:
+        return render(request, "login.html", error=t("err_locked", min=(wait + 59) // 60), login_name=login)
+    user = storage.get_user_by_login(login)
+    if not auth.check(login, user, password):
+        wait = auth.locked_for(login)
+        error = t("err_locked", min=(wait + 59) // 60) if wait else t("err_wrong_credentials")
         return render(request, "login.html", error=error, login_name=login)
-    except mp_client.MPError as exc:
-        error = t("err_unreachable") if exc.code == "unreachable" else t("err_generic", msg=exc.message)
-        return render(request, "login.html", error=error, login_name=login)
+    if user["disabled"]:
+        return render(request, "login.html", error=t("err_user_disabled"), login_name=login)
+    # Nothing connected yet: the servers page is where work starts.
+    return _signed_in(user, "/servers")
 
-    response = RedirectResponse("/", status_code=303)
-    response.set_cookie(
-        sessions.COOKIE_NAME,
-        sessions.create(mp_client.Conn(sessions.MAIN_SERVER, settings.main_server_name, settings.mp_api_url, token),
-                        profile, login),
-        httponly=True, samesite="lax",
-    )
-    return response
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    """First run: create the administrator. Only while there are no users, and only from this computer."""
+    if storage.count_users():
+        return RedirectResponse("/login", status_code=303)
+    return render(request, "setup.html", error=None, local=_is_local(request), login_name="", admin_name="")
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_submit(request: Request, login: str = Form(...), name: str = Form(""), password: str = Form(...),
+                       password2: str = Form(...)):
+    if storage.count_users():
+        return RedirectResponse("/login", status_code=303)
+    t = i18n.translator(i18n.pick_lang(request))
+    if not _is_local(request):
+        raise HTTPException(403, "The administrator can only be created on the computer running the Toolkit")
+    error = _password_problem(password, password2, t) or (None if login.strip() else t("err_login_required"))
+    if error:
+        return render(request, "setup.html", error=error, local=True, login_name=login, admin_name=name)
+    uid = storage.create_user(login, name or login, auth.hash_password(password), "admin")
+    user = storage.get_user(uid)
+    storage.claim_unowned(uid, user["name"])  # templates and servers from before Toolkit had users
+    return _signed_in(user, "/servers")
+
+
+def _password_problem(password: str, password2: str, t) -> str | None:
+    if len(password) < auth.MIN_PASSWORD_LENGTH:
+        return t("err_password_short", n=auth.MIN_PASSWORD_LENGTH)
+    if password != password2:
+        return t("err_password_mismatch")
+    return None
 
 
 @app.post("/logout")
@@ -153,8 +197,7 @@ async def wizard(request: Request, session: sessions.Session = Depends(current_s
 async def api_nodes(all: bool = False, session: sessions.Session = Depends(current_session)):
     """Probe nodes of the server picked in the header (or of every connected server with all=true, as a
     template that spans several servers needs). A server that fails is reported, not fatal."""
-    conns = session.scoped() if not all else sorted(
-        session.conns.values(), key=lambda c: (c.server_id != sessions.MAIN_SERVER, c.name.lower()))
+    conns = session.scoped() if not all else sorted(session.conns.values(), key=lambda c: c.name.lower())
     results = await asyncio.gather(*(mp_client.nodes(c) for c in conns), return_exceptions=True)
     out, errors = [], []
     for c, res in zip(conns, results):
@@ -163,7 +206,8 @@ async def api_nodes(all: bool = False, session: sessions.Session = Depends(curre
             continue
         for n in sorted(res, key=lambda n: n["name"]):
             out.append({"server_id": c.server_id, "server": c.name, "id": n["nodeID"], "name": n["name"]})
-    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1 or len(session.conns) > 1}
+    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1 or len(session.conns) > 1,
+            "connected": bool(session.conns)}
 
 
 def _is_reportable(obj: dict) -> bool:
@@ -188,6 +232,15 @@ async def api_objects(node_id: int, server_id: int = 0, session: sessions.Sessio
     ]
 
 
+def _catalog_conn(session: sessions.Session) -> mp_client.Conn:
+    """Analyzer, measure and alarm catalogues come from a connected server (the picked one first);
+    MultiProbe installations of one version share them."""
+    conns = session.scoped()
+    if not conns:
+        raise sessions.NotConnected(None)
+    return conns[0]
+
+
 class MeasuresRequest(BaseModel):
     analyzer_ids: list[int]
 
@@ -195,7 +248,7 @@ class MeasuresRequest(BaseModel):
 @app.post("/api/measures")
 async def api_measures(req: MeasuresRequest, session: sessions.Session = Depends(current_session)):
     """Measures available for the analyzers of the selected objects, grouped by analyzer."""
-    catalog = await mp_client.measure_catalog(session.main)
+    catalog = await mp_client.measure_catalog(_catalog_conn(session))
     result = []
     for analyzer_id in sorted(set(req.analyzer_ids)):
         analyzer = catalog.get(analyzer_id)
@@ -224,8 +277,8 @@ class AlarmTypesRequest(BaseModel):
 async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = Depends(current_session)):
     """Alarm definitions of the selected objects' analyzers, grouped by severity (most severe first).
     Every MultiProbe priority group is listed, even when none of its alarms apply to the objects."""
-    catalog = await mp_client.alarm_catalog(session.main)
-    groups = await mp_client.alarm_groups(session.main)
+    catalog = await mp_client.alarm_catalog(_catalog_conn(session))
+    groups = await mp_client.alarm_groups(_catalog_conn(session))
     wanted = set(req.analyzer_ids)
     by_group: dict[str, list[dict]] = {g["name"]: [] for g in groups}
     for a in catalog.values():
@@ -244,7 +297,7 @@ async def api_alarm_types(req: AlarmTypesRequest, session: sessions.Session = De
 
 class Target(BaseModel):
     """Objects of one probe node on one MultiProbe server."""
-    server_id: int = 0
+    server_id: int
     node_id: int
     object_ids: list[str] = Field(min_length=1)
 
@@ -311,8 +364,9 @@ def _period(req: ReportRequest, tz: ZoneInfo) -> tuple[datetime, datetime]:
 def _targets(req: ReportRequest) -> list[Target]:
     if req.targets:
         return req.targets
-    if req.node_id is not None and req.object_ids:
-        return [Target(server_id=sessions.MAIN_SERVER, node_id=req.node_id, object_ids=req.object_ids)]
+    default = storage.default_server_id()
+    if req.node_id is not None and req.object_ids and default is not None:
+        return [Target(server_id=default, node_id=req.node_id, object_ids=req.object_ids)]
     raise HTTPException(422, "No objects selected")
 
 
@@ -365,7 +419,7 @@ async def api_report_start(req: ReportRequest, session: sessions.Session = Depen
 
 class ObjectsOverride(BaseModel):
     """Run a template (or a quick report) for other objects, e.g. a channel clicked on the overview."""
-    server_id: int = 0
+    server_id: int
     node_id: int
     object_ids: list[str] = Field(min_length=1)
     expand: bool = True  # also take everything inside these objects, as ticking them in the wizard does
@@ -828,10 +882,8 @@ def _server_out(srv: dict, session: sessions.Session) -> dict:
     conn = session.conns.get(srv["id"])
     return {
         "id": srv["id"], "name": srv["name"], "url": srv["url"], "verify_tls": srv["verify_tls"],
-        "main": srv["id"] == sessions.MAIN_SERVER,
         "connected": conn is not None, "login": session.logins.get(srv["id"]) if conn else None,
         "added_by": srv.get("created_by_name", ""),
-        "mine": srv.get("created_by") == session.user_id,
     }
 
 
@@ -843,9 +895,7 @@ async def servers_page(request: Request, session: sessions.Session = Depends(cur
 
 @app.get("/api/servers")
 async def api_servers(session: sessions.Session = Depends(current_session)):
-    main = {"id": sessions.MAIN_SERVER, "name": settings.main_server_name, "url": settings.mp_api_url,
-            "verify_tls": True, "created_by_name": ""}
-    return [_server_out(main, session)] + [_server_out(s, session) for s in storage.list_servers()]
+    return {"servers": [_server_out(s, session) for s in storage.list_servers()], "is_admin": session.is_admin}
 
 
 class ServerIn(BaseModel):
@@ -860,14 +910,11 @@ def _clean_url(url: str) -> str:
     parts = urlsplit(url.strip())
     if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
         raise HTTPException(422, "The address must start with http:// or https://")
-    url = f"{parts.scheme.lower()}://{parts.netloc}"
-    if url == settings.mp_api_url:
-        raise HTTPException(422, "This is the main server")
-    return url
+    return f"{parts.scheme.lower()}://{parts.netloc}"
 
 
 @app.post("/api/servers")
-async def api_server_create(body: ServerIn, session: sessions.Session = Depends(current_session)):
+async def api_server_create(body: ServerIn, session: sessions.Session = Depends(admin_session)):
     url = _clean_url(body.url)
     if any(s["url"] == url for s in storage.list_servers()):
         raise HTTPException(409, "This server is already in the list")
@@ -875,7 +922,7 @@ async def api_server_create(body: ServerIn, session: sessions.Session = Depends(
 
 
 @app.put("/api/servers/{server_id}")
-async def api_server_update(server_id: int, body: ServerIn, session: sessions.Session = Depends(current_session)):
+async def api_server_update(server_id: int, body: ServerIn, session: sessions.Session = Depends(admin_session)):
     if not storage.update_server(server_id, body.name.strip(), _clean_url(body.url), body.verify_tls):
         raise HTTPException(404, "Server not found")
     session.conns.pop(server_id, None)  # the address may have changed: sign in again
@@ -883,12 +930,9 @@ async def api_server_update(server_id: int, body: ServerIn, session: sessions.Se
 
 
 @app.delete("/api/servers/{server_id}")
-async def api_server_delete(server_id: int, session: sessions.Session = Depends(current_session)):
-    srv = storage.get_server(server_id)
-    if srv is None:
+async def api_server_delete(server_id: int, session: sessions.Session = Depends(admin_session)):
+    if storage.get_server(server_id) is None:
         raise HTTPException(404, "Server not found")
-    if srv["created_by"] != session.user_id:
-        raise HTTPException(403, "Only the user who added the server can remove it")
     storage.delete_server(server_id)
     session.conns.pop(server_id, None)
     return {"ok": True}
@@ -908,7 +952,7 @@ async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
         raise HTTPException(404, "Server not found")
     t = i18n.translator(i18n.pick_lang(request))
     try:
-        token, _profile = await mp_client.login(srv["url"], body.login, body.password, srv["verify_tls"])
+        token, profile = await mp_client.login(srv["url"], body.login, body.password, srv["verify_tls"])
     except mp_client.MPAuthError as exc:
         msg = {"authErrorUserDisabled": t("err_user_disabled"), "authErrorUserBanned": t("err_user_banned")}.get(
             exc.code, t("err_wrong_credentials"))
@@ -920,6 +964,11 @@ async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
         raise HTTPException(502, t("err_server_unreachable", msg=exc.message[:200]))
     session.conns[server_id] = mp_client.Conn(server_id, srv["name"], srv["url"], token, srv["verify_tls"])
     session.logins[server_id] = body.login
+    # No time zone chosen yet: take the one this MultiProbe account uses.
+    mp_tz = (profile.get("timeZoneSettings") or {}).get("timeZone")
+    if not session.user.get("time_zone") and mp_tz:
+        storage.update_user(session.user["id"], time_zone=mp_tz)
+        sessions.update_user(storage.get_user(session.user["id"]))
     return {"ok": True}
 
 
@@ -938,8 +987,134 @@ async def api_scope(body: ScopeIn, session: sessions.Session = Depends(current_s
 
 @app.post("/api/servers/{server_id}/disconnect")
 async def api_server_disconnect(server_id: int, session: sessions.Session = Depends(current_session)):
-    if server_id == sessions.MAIN_SERVER:
-        raise HTTPException(422, "Sign out to leave the main server")
     session.conns.pop(server_id, None)
     session.logins.pop(server_id, None)
+    return {"ok": True}
+
+
+# --- Toolkit users ------------------------------------------------------------------------------
+
+def _user_out(u: dict) -> dict:
+    return {k: u[k] for k in ("id", "login", "name", "role", "disabled", "time_zone", "created", "last_login")}
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request, session: sessions.Session = Depends(admin_session)):
+    return render(request, "users.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
+
+
+@app.get("/api/users")
+async def api_users(session: sessions.Session = Depends(admin_session)):
+    return {"users": [_user_out(u) for u in storage.list_users()], "me": session.user["id"]}
+
+
+class UserIn(BaseModel):
+    login: str = Field(min_length=1, max_length=100)
+    name: str = Field("", max_length=100)
+    role: Literal["admin", "user"] = "user"
+    password: str = ""
+
+
+class UserUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    role: Literal["admin", "user"]
+    disabled: bool = False
+    password: str = ""  # set = reset the password
+
+
+def _admins_left(excluding: int) -> int:
+    return sum(1 for u in storage.list_users() if u["role"] == "admin" and not u["disabled"] and u["id"] != excluding)
+
+
+@app.post("/api/users")
+async def api_user_create(body: UserIn, request: Request, session: sessions.Session = Depends(admin_session)):
+    t = i18n.translator(i18n.pick_lang(request))
+    problem = _password_problem(body.password, body.password, t)
+    if problem:
+        raise HTTPException(422, problem)
+    if storage.get_user_by_login(body.login):
+        raise HTTPException(409, t("err_login_taken"))
+    uid = storage.create_user(body.login, body.name or body.login, auth.hash_password(body.password), body.role)
+    return {"id": uid}
+
+
+@app.put("/api/users/{user_id}")
+async def api_user_update(user_id: int, body: UserUpdate, request: Request,
+                          session: sessions.Session = Depends(admin_session)):
+    t = i18n.translator(i18n.pick_lang(request))
+    user = storage.get_user(user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    if (body.role != "admin" or body.disabled) and user["role"] == "admin" and not _admins_left(user_id):
+        raise HTTPException(422, t("err_last_admin"))
+    fields = {"name": body.name, "role": body.role, "disabled": body.disabled}
+    if body.password:
+        problem = _password_problem(body.password, body.password, t)
+        if problem:
+            raise HTTPException(422, problem)
+        fields["password"] = auth.hash_password(body.password)
+    storage.update_user(user_id, **fields)
+    if body.disabled or body.password:
+        sessions.drop_user(user_id)  # sign them out everywhere
+    else:
+        sessions.update_user(storage.get_user(user_id))
+    return {"ok": True}
+
+
+@app.delete("/api/users/{user_id}")
+async def api_user_delete(user_id: int, request: Request, session: sessions.Session = Depends(admin_session)):
+    t = i18n.translator(i18n.pick_lang(request))
+    if user_id == session.user["id"]:
+        raise HTTPException(422, t("err_delete_self"))
+    user = storage.get_user(user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    if user["role"] == "admin" and not _admins_left(user_id):
+        raise HTTPException(422, t("err_last_admin"))
+    storage.delete_user(user_id)
+    sessions.drop_user(user_id)
+    return {"ok": True}
+
+
+@app.get("/account", response_class=HTMLResponse)
+async def account_page(request: Request, session: sessions.Session = Depends(current_session)):
+    from zoneinfo import available_timezones
+    zones = sorted(z for z in available_timezones() if "/" in z and not z.startswith(("Etc/", "SystemV/")))
+    return render(request, "account.html", session=session, zones=["UTC"] + zones,
+                  strings=i18n.bundle(i18n.pick_lang(request)))
+
+
+class AccountIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    time_zone: str = Field(max_length=64)
+
+
+@app.put("/api/account")
+async def api_account(body: AccountIn, session: sessions.Session = Depends(current_session)):
+    try:
+        ZoneInfo(body.time_zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(422, "Unknown time zone")
+    storage.update_user(session.user["id"], name=body.name.strip(), time_zone=body.time_zone)
+    sessions.update_user(storage.get_user(session.user["id"]))
+    return {"ok": True}
+
+
+class PasswordIn(BaseModel):
+    current: str
+    new: str
+    new2: str
+
+
+@app.post("/api/account/password")
+async def api_account_password(body: PasswordIn, request: Request,
+                               session: sessions.Session = Depends(current_session)):
+    t = i18n.translator(i18n.pick_lang(request))
+    user = storage.get_user(session.user["id"])
+    if not auth.verify_password(body.current, user["password"]):
+        raise HTTPException(422, t("err_current_password"))
+    problem = _password_problem(body.new, body.new2, t)
+    if problem:
+        raise HTTPException(422, problem)
+    storage.update_user(user["id"], password=auth.hash_password(body.new))
     return {"ok": True}

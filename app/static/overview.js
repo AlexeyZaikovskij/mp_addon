@@ -102,6 +102,7 @@
     try {
       state = await api("/api/overview/state");
       $("#updated").textContent = state.updated;
+      $("#no-servers").hidden = state.servers.length > 0;
       $("#server-errors").innerHTML = state.errors.map((e) =>
         `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
       renderPie();

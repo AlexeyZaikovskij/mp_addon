@@ -4,9 +4,10 @@
 <section class="card">
   <div class="section-head">
     <h1>{{ t("nav_servers") }}</h1>
-    <button type="button" class="btn" id="add">+ {{ t("srv_add") }}</button>
+    <button type="button" class="btn" id="add" hidden>+ {{ t("srv_add") }}</button>
   </div>
   <p class="muted">{{ t("srv_hint") }}</p>
+  <p class="notice" id="srv-empty" hidden>{{ t("srv_empty_admin") if session.is_admin else t("srv_empty_user") }}</p>
 
   <form class="srv-form" id="srv-form" hidden autocomplete="off">
     <input type="hidden" id="srv-id">

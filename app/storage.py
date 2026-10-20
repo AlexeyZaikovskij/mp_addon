@@ -1,4 +1,5 @@
-"""Report templates and the list of MultiProbe servers, kept in a small SQLite file (data/addon.db)."""
+"""Toolkit users, report templates and the list of MultiProbe servers, kept in a small SQLite file
+(data/addon.db)."""
 import json
 import sqlite3
 from contextlib import closing
@@ -23,9 +24,24 @@ CREATE TABLE IF NOT EXISTS server (
     name        TEXT NOT NULL,
     url         TEXT NOT NULL UNIQUE,
     verify_tls  INTEGER NOT NULL DEFAULT 1,
-    created_by  TEXT NOT NULL,      -- user id on the main server
+    created_by  TEXT NOT NULL,      -- Toolkit user id
     created_by_name TEXT NOT NULL,
     created     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_user (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    login       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name        TEXT NOT NULL,
+    password    TEXT NOT NULL,      -- scrypt hash, see auth.py
+    role        TEXT NOT NULL DEFAULT 'user',   -- admin | user
+    time_zone   TEXT NOT NULL DEFAULT '',
+    disabled    INTEGER NOT NULL DEFAULT 0,
+    created     TEXT NOT NULL,
+    last_login  TEXT
+);
+CREATE TABLE IF NOT EXISTS kv (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
 );
 """
 
@@ -40,6 +56,46 @@ def _connect() -> sqlite3.Connection:
 def init() -> None:
     with closing(_connect()) as conn:
         conn.executescript(_SCHEMA)
+    _migrate_main_server()
+
+
+def get_kv(key: str) -> str | None:
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_kv(key: str, value: str) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                     (key, value))
+
+
+def default_server_id() -> int | None:
+    """The server from config.env (MP_API_URL). Templates saved before every server was in the list
+    (server id 0, or just node_id/object_ids) refer to it."""
+    value = get_kv("default_server_id")
+    return int(value) if value else None
+
+
+def _migrate_main_server() -> None:
+    """Once: put the config.env server into the server list and point old templates at it."""
+    if get_kv("default_server_id") is not None or not settings.mp_api_url:
+        return
+    existing = next((s for s in list_servers() if s["url"] == settings.mp_api_url), None)
+    sid = existing["id"] if existing else create_server(settings.main_server_name, settings.mp_api_url, True, "", "")
+    with closing(_connect()) as conn, conn:
+        for row in conn.execute("SELECT id, params FROM report_template").fetchall():
+            params = json.loads(row["params"])
+            if params.get("targets"):
+                for t in params["targets"]:
+                    if t.get("server_id") == 0:
+                        t["server_id"] = sid
+            elif params.get("node_id") is not None:
+                params["targets"] = [{"server_id": sid, "node_id": params.pop("node_id"),
+                                      "object_ids": params.pop("object_ids", [])}]
+            conn.execute("UPDATE report_template SET params = ? WHERE id = ?", (json.dumps(params), row["id"]))
+        conn.execute("INSERT INTO kv (key, value) VALUES ('default_server_id', ?)", (str(sid),))
 
 
 def _now() -> str:
@@ -145,3 +201,68 @@ def update_server(server_id: int, name: str, url: str, verify_tls: bool) -> bool
 def delete_server(server_id: int) -> bool:
     with closing(_connect()) as conn, conn:
         return conn.execute("DELETE FROM server WHERE id = ?", (server_id,)).rowcount == 1
+
+
+# --- Toolkit users ----------------------------------------------------------------------------
+
+def _user(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    d = dict(row)
+    d["disabled"] = bool(d["disabled"])
+    return d
+
+
+def count_users() -> int:
+    with closing(_connect()) as conn:
+        return conn.execute("SELECT COUNT(*) FROM app_user").fetchone()[0]
+
+
+def list_users() -> list[dict[str, Any]]:
+    with closing(_connect()) as conn:
+        rows = conn.execute("SELECT * FROM app_user ORDER BY login COLLATE NOCASE").fetchall()
+    return [_user(r) for r in rows]
+
+
+def get_user(user_id: int) -> dict[str, Any] | None:
+    with closing(_connect()) as conn:
+        return _user(conn.execute("SELECT * FROM app_user WHERE id = ?", (user_id,)).fetchone())
+
+
+def get_user_by_login(login: str) -> dict[str, Any] | None:
+    with closing(_connect()) as conn:
+        return _user(conn.execute("SELECT * FROM app_user WHERE login = ? COLLATE NOCASE", (login.strip(),)).fetchone())
+
+
+def create_user(login: str, name: str, password_hash: str, role: str) -> int:
+    with closing(_connect()) as conn, conn:
+        cur = conn.execute("INSERT INTO app_user (login, name, password, role, created) VALUES (?, ?, ?, ?, ?)",
+                           (login.strip(), name.strip(), password_hash, role, _now()))
+        return int(cur.lastrowid)
+
+
+def update_user(user_id: int, **fields: Any) -> None:
+    allowed = {"name", "role", "disabled", "time_zone", "password", "last_login"}
+    sets = {k: (int(v) if k == "disabled" else v) for k, v in fields.items() if k in allowed}
+    if not sets:
+        return
+    with closing(_connect()) as conn, conn:
+        conn.execute(f"UPDATE app_user SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+                     (*sets.values(), user_id))
+
+
+def delete_user(user_id: int) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute("DELETE FROM app_user WHERE id = ?", (user_id,))
+
+
+def claim_unowned(user_id: int, user_name: str) -> None:
+    """The first administrator takes over templates and servers created before Toolkit had its own
+    users (they belonged to MultiProbe user ids)."""
+    ids = [str(u["id"]) for u in list_users()]
+    marks = ",".join("?" * len(ids))
+    with closing(_connect()) as conn, conn:
+        conn.execute(f"UPDATE report_template SET owner_id = ?, owner_name = ? WHERE owner_id NOT IN ({marks})",
+                     (str(user_id), user_name, *ids))
+        conn.execute(f"UPDATE server SET created_by = ?, created_by_name = ? WHERE created_by NOT IN ({marks})",
+                     (str(user_id), user_name, *ids))

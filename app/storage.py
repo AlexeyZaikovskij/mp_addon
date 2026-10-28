@@ -1,12 +1,15 @@
-"""Toolkit users, report templates and the list of MultiProbe servers, kept in a small SQLite file
-(data/addon.db)."""
+"""Toolkit users, report templates, the list of MultiProbe servers and the MultiProbe accounts the Toolkit
+keeps, in a small SQLite file (data/addon.db)."""
 import json
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any
 
+from . import vault
 from .config import settings
+
+JOBS = "@jobs"  # owner of the account a server's scheduled jobs use (instead of a Toolkit user id)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS report_template (
@@ -38,6 +41,14 @@ CREATE TABLE IF NOT EXISTS app_user (
     disabled    INTEGER NOT NULL DEFAULT 0,
     created     TEXT NOT NULL,
     last_login  TEXT
+);
+CREATE TABLE IF NOT EXISTS mp_credential (
+    owner       TEXT NOT NULL,      -- Toolkit user id, or '@jobs' for the server's scheduled jobs
+    server_id   INTEGER NOT NULL,
+    login       TEXT NOT NULL,
+    secret      BLOB NOT NULL,      -- password encrypted with DPAPI, see vault.py
+    updated     TEXT NOT NULL,
+    PRIMARY KEY (owner, server_id)
 );
 CREATE TABLE IF NOT EXISTS kv (
     key         TEXT PRIMARY KEY,
@@ -200,7 +211,48 @@ def update_server(server_id: int, name: str, url: str, verify_tls: bool) -> bool
 
 def delete_server(server_id: int) -> bool:
     with closing(_connect()) as conn, conn:
+        conn.execute("DELETE FROM mp_credential WHERE server_id = ?", (server_id,))
         return conn.execute("DELETE FROM server WHERE id = ?", (server_id,)).rowcount == 1
+
+
+# --- MultiProbe accounts the Toolkit keeps ("remember the password", the account for jobs) ---------
+
+def save_credential(owner: str, server_id: int, login: str, password: str) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            "INSERT INTO mp_credential (owner, server_id, login, secret, updated) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(owner, server_id) DO UPDATE SET login = excluded.login, secret = excluded.secret,"
+            " updated = excluded.updated",
+            (owner, server_id, login, vault.encrypt(password), _now()),
+        )
+
+
+def get_credential(owner: str, server_id: int) -> tuple[str, str] | None:
+    """(login, password), or None when nothing is kept or it cannot be decrypted on this computer."""
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT login, secret FROM mp_credential WHERE owner = ? AND server_id = ?",
+                           (owner, server_id)).fetchone()
+    if row is None:
+        return None
+    try:
+        return row["login"], vault.decrypt(row["secret"])
+    except vault.VaultError:
+        return None
+
+
+def credential_logins(owner: str) -> dict[int, str]:
+    """server id -> login of the accounts kept for this owner."""
+    with closing(_connect()) as conn:
+        rows = conn.execute("SELECT server_id, login FROM mp_credential WHERE owner = ?", (owner,)).fetchall()
+    return {r["server_id"]: r["login"] for r in rows}
+
+
+def delete_credential(owner: str, server_id: int | None = None) -> None:
+    with closing(_connect()) as conn, conn:
+        if server_id is None:
+            conn.execute("DELETE FROM mp_credential WHERE owner = ?", (owner,))
+        else:
+            conn.execute("DELETE FROM mp_credential WHERE owner = ? AND server_id = ?", (owner, server_id))
 
 
 # --- Toolkit users ----------------------------------------------------------------------------
@@ -253,6 +305,7 @@ def update_user(user_id: int, **fields: Any) -> None:
 
 def delete_user(user_id: int) -> None:
     with closing(_connect()) as conn, conn:
+        conn.execute("DELETE FROM mp_credential WHERE owner = ?", (str(user_id),))
         conn.execute("DELETE FROM app_user WHERE id = ?", (user_id,))
 
 

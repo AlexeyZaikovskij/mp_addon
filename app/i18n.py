@@ -92,6 +92,27 @@ STRINGS: dict[str, dict[str, str]] = {
     "rec_download": {"en": "Download", "ru": "Скачать"},
     "rec_err_too_long": {"en": "A piece can be at most {n} min long.", "ru": "Фрагмент может быть не длиннее {n} мин."},
     "rec_err_future": {"en": "The piece starts in the future.", "ru": "Фрагмент начинается в будущем."},
+    "srv_remember": {"en": "Remember the password", "ru": "Запомнить пароль"},
+    "srv_remember_hint": {
+        "en": "The Toolkit then connects you to this server by itself when you sign in, and again when MultiProbe asks for a new sign-in. The password is kept encrypted (Windows DPAPI) and can be read only on this computer.",
+        "ru": "Тогда Toolkit сам подключит вас к этому серверу при входе и переподключит, когда MultiProbe потребует войти заново. Пароль хранится зашифрованным (Windows DPAPI) и читается только на этом компьютере.",
+    },
+    "srv_remembered": {"en": "Password kept for {login}", "ru": "Пароль сохранён для {login}"},
+    "srv_forget": {"en": "Forget", "ru": "Забыть"},
+    "srv_auto_failed": {"en": "Automatic connection failed", "ru": "Автоподключение не удалось"},
+    "srv_jobs_account": {"en": "Account for jobs", "ru": "Учётка для заданий"},
+    "srv_jobs_none": {"en": "not set", "ru": "не задана"},
+    "srv_jobs_set": {"en": "Set", "ru": "Задать"},
+    "srv_jobs_title": {"en": "Account for scheduled jobs on {name}", "ru": "Учётка для заданий на сервере {name}"},
+    "srv_jobs_hint": {
+        "en": "Scheduled exports run with this MultiProbe account, also when nobody is signed in. It is checked by signing in, then kept encrypted (Windows DPAPI).",
+        "ru": "Запланированные выгрузки работают под этой учётной записью MultiProbe, в том числе когда никто не вошёл в Toolkit. Перед сохранением она проверяется входом в MultiProbe, хранится зашифрованной (Windows DPAPI).",
+    },
+    "srv_jobs_saved": {"en": "The account for jobs on {name} is saved.", "ru": "Учётка для заданий на сервере {name} сохранена."},
+    "srv_jobs_delete_confirm": {
+        "en": "Remove the account for jobs on {name}? Scheduled exports from this server will stop working.",
+        "ru": "Удалить учётку для заданий на сервере {name}? Запланированные выгрузки с этого сервера перестанут работать.",
+    },
     "nav_users": {"en": "Users", "ru": "Пользователи"},
     "nav_account": {"en": "My account", "ru": "Моя учётная запись"},
     "users_add": {"en": "Add user", "ru": "Добавить пользователя"},
@@ -219,9 +240,11 @@ STRINGS: dict[str, dict[str, str]] = {
     "srv_add": {"en": "Add server", "ru": "Добавить сервер"},
     "srv_hint": {
         "en": "MultiProbe installations the Toolkit works with (managed by administrators). Connect to each with an "
-              "account of that MultiProbe server; the password is not stored, the connection lasts for your session.",
+              "account of that MultiProbe server. The connection lasts for your session; with “Remember the password” "
+              "the Toolkit connects you by itself every time you sign in.",
         "ru": "Установки MultiProbe, с которыми работает Toolkit (список ведут администраторы). Подключайтесь к каждой "
-              "учётной записью этого сервера MultiProbe; пароль не хранится, подключение действует до конца сессии.",
+              "учётной записью этого сервера MultiProbe. Подключение действует до конца сессии; с галочкой «Запомнить "
+              "пароль» Toolkit будет подключать вас сам при каждом входе.",
     },
     "srv_name": {"en": "Name", "ru": "Название"},
     "srv_name_ph": {"en": "e.g. Site 2", "ru": "например, Площадка 2"},

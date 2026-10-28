@@ -36,6 +36,7 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
 | `app/recordings.py` | Recordings: timeline, HLS preview through the Toolkit, MP4/MP3 export (PyAV) |
 | `app/auth.py` | Toolkit passwords (scrypt) and the lock-out after failed sign-ins |
+| `app/vault.py` | Kept MultiProbe passwords (remembered accounts, the account for jobs), encrypted with Windows DPAPI |
 | `app/sessions.py` | Server-side sessions (the MP token never reaches the browser) |
 | `app/i18n.py` | EN/RU strings |
 | `app/templates/`, `app/static/` | Pages, styles, wizard script (no CDN — works offline) |

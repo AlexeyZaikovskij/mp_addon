@@ -1,7 +1,8 @@
 """Thin async client for the MultiProbe REST API. See docs/MP_API_NOTES.md."""
+import asyncio
 import time
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -33,7 +34,7 @@ _AUTH_CODES = {
     "authErrorUnauthorized",
 }
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class Conn:
     """A signed-in connection to one MultiProbe server."""
     server_id: int      # 0 = the main server from config.env, otherwise the id in the server list
@@ -41,6 +42,22 @@ class Conn:
     url: str
     token: str
     verify_tls: bool = True  # False only for a server explicitly marked as using a self-signed certificate
+    # Signs in again when MultiProbe stops accepting the token (only with a kept password): a new token.
+    renew: Callable[[], Awaitable[str]] | None = field(default=None, repr=False)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+
+async def _renewed(conn: Conn, used_token: str) -> bool:
+    """After a 401: sign in again, once for all the requests that hit it together. False = not possible."""
+    if conn.renew is None:
+        return False
+    async with conn._lock:
+        if conn.token == used_token:
+            try:
+                conn.token = await conn.renew()
+            except MPError:
+                return False
+    return True
 
 
 _clients: dict[tuple[str, bool], httpx.AsyncClient] = {}
@@ -89,42 +106,56 @@ async def login(url: str, login_name: str, password: str, verify_tls: bool = Tru
 
 
 async def call(conn: Conn, method: str, path: str, body: Any = None) -> Any:
-    try:
-        resp = await client(conn.url, conn.verify_tls).request(
-            method, path, json=body, headers={"Cookie": f"{TOKEN_COOKIE}={conn.token}"}
-        )
-    except httpx.HTTPError as exc:
-        raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
-    _raise_for(resp, conn.server_id)
-    return resp.json() if resp.content else None
+    for attempt in range(2):
+        token = conn.token
+        try:
+            resp = await client(conn.url, conn.verify_tls).request(
+                method, path, json=body, headers={"Cookie": f"{TOKEN_COOKIE}={token}"}
+            )
+        except httpx.HTTPError as exc:
+            raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+        if resp.status_code == 401 and attempt == 0 and await _renewed(conn, token):
+            continue
+        _raise_for(resp, conn.server_id)
+        return resp.json() if resp.content else None
 
 
 async def get_file(conn: Conn, path: str) -> httpx.Response:
     """A file MultiProbe publishes outside the API (HLS of a recording). The caller checks the status:
     404 is normal while MultiProbe has not written the file yet."""
-    try:
-        return await client(conn.url, conn.verify_tls).get(path, headers={"Cookie": f"{TOKEN_COOKIE}={conn.token}"})
-    except httpx.HTTPError as exc:
-        raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+    for attempt in range(2):
+        token = conn.token
+        try:
+            resp = await client(conn.url, conn.verify_tls).get(path, headers={"Cookie": f"{TOKEN_COOKIE}={token}"})
+        except httpx.HTTPError as exc:
+            raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+        if resp.status_code == 401 and attempt == 0 and await _renewed(conn, token):
+            continue
+        return resp
 
 
 async def download(conn: Conn, path: str, dest, progress=None) -> None:
     """Save a (possibly large) file MultiProbe publishes to `dest`; `progress(bytes_done, bytes_total)`."""
-    try:
-        async with client(conn.url, conn.verify_tls).stream(
-            "GET", path, headers={"Cookie": f"{TOKEN_COOKIE}={conn.token}"}, timeout=httpx.Timeout(120, read=600)
-        ) as resp:
-            if resp.status_code != 200:
-                raise MPError(f"http{resp.status_code}", f"{conn.name}: {path}", resp.status_code, conn.server_id)
-            total, done = int(resp.headers.get("content-length") or 0), 0
-            with open(dest, "wb") as f:
-                async for chunk in resp.aiter_bytes(1 << 20):
-                    f.write(chunk)
-                    done += len(chunk)
-                    if progress:
-                        progress(done, total)
-    except httpx.HTTPError as exc:
-        raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+    for attempt in range(2):
+        token = conn.token
+        try:
+            async with client(conn.url, conn.verify_tls).stream(
+                "GET", path, headers={"Cookie": f"{TOKEN_COOKIE}={token}"}, timeout=httpx.Timeout(120, read=600)
+            ) as resp:
+                if resp.status_code == 401 and attempt == 0 and await _renewed(conn, token):
+                    continue
+                if resp.status_code != 200:
+                    raise MPError(f"http{resp.status_code}", f"{conn.name}: {path}", resp.status_code, conn.server_id)
+                total, done = int(resp.headers.get("content-length") or 0), 0
+                with open(dest, "wb") as f:
+                    async for chunk in resp.aiter_bytes(1 << 20):
+                        f.write(chunk)
+                        done += len(chunk)
+                        if progress:
+                            progress(done, total)
+                return
+        except httpx.HTTPError as exc:
+            raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
 
 
 # --- Dictionaries -----------------------------------------------------------

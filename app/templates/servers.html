@@ -23,7 +23,8 @@
   <div class="table-wrap">
     <table class="grid servers">
       <thead><tr>
-        <th>{{ t("srv_name") }}</th><th>{{ t("srv_url") }}</th><th>{{ t("srv_status") }}</th><th></th>
+        <th>{{ t("srv_name") }}</th><th>{{ t("srv_url") }}</th><th>{{ t("srv_status") }}</th>
+        {% if session.is_admin %}<th title="{{ t('srv_jobs_hint') }}">{{ t("srv_jobs_account") }}</th>{% endif %}<th></th>
       </tr></thead>
       <tbody id="srv-rows"><tr><td colspan="4" class="muted">{{ t("loading") }}</td></tr></tbody>
     </table>
@@ -37,9 +38,11 @@
     <p class="muted">{{ t("srv_connect_hint") }}</p>
     <label>{{ t("login") }} <input id="c-login" required autocomplete="off"></label>
     <label>{{ t("password") }} <input id="c-password" type="password" autocomplete="new-password"></label>
+    <label class="inline" id="c-remember-wrap"><input type="checkbox" id="c-remember"> {{ t("srv_remember") }}</label>
+    <p class="muted small" id="c-remember-hint">{{ t("srv_remember_hint") }}</p>
     <div class="error" id="connect-error" hidden></div>
     <div class="srv-form-actions">
-      <button type="submit" class="primary">{{ t("srv_connect") }}</button>
+      <button type="submit" class="primary" id="connect-submit">{{ t("srv_connect") }}</button>
       <button type="button" class="link" id="connect-cancel">{{ t("cancel") }}</button>
     </div>
   </form>

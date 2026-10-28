@@ -102,10 +102,15 @@ def render(request: Request, name: str, **context) -> HTMLResponse:
 
 # --- Pages ------------------------------------------------------------------
 
-def _signed_in(user: dict, to: str) -> RedirectResponse:
+async def _signed_in(user: dict) -> RedirectResponse:
+    """Start the session and connect to the servers whose password the user asked to remember. With a
+    connection the work starts on the overview, without one on the servers page."""
     storage.update_user(user["id"], last_login=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    response = RedirectResponse(to, status_code=303)
-    response.set_cookie(sessions.COOKIE_NAME, sessions.create(user), httponly=True, samesite="lax")
+    sid = sessions.create(user)
+    session = sessions.get(sid)
+    await _auto_connect(session)
+    response = RedirectResponse("/" if session.conns else "/servers", status_code=303)
+    response.set_cookie(sessions.COOKIE_NAME, sid, httponly=True, samesite="lax")
     return response
 
 
@@ -133,8 +138,7 @@ async def login_submit(request: Request, login: str = Form(...), password: str =
         return render(request, "login.html", error=error, login_name=login)
     if user["disabled"]:
         return render(request, "login.html", error=t("err_user_disabled"), login_name=login)
-    # Nothing connected yet: the servers page is where work starts.
-    return _signed_in(user, "/servers")
+    return await _signed_in(user)
 
 
 @app.get("/setup", response_class=HTMLResponse)
@@ -159,7 +163,7 @@ async def setup_submit(request: Request, login: str = Form(...), name: str = For
     uid = storage.create_user(login, name or login, auth.hash_password(password), "admin")
     user = storage.get_user(uid)
     storage.claim_unowned(uid, user["name"])  # templates and servers from before Toolkit had users
-    return _signed_in(user, "/servers")
+    return await _signed_in(user)
 
 
 def _password_problem(password: str, password2: str, t) -> str | None:
@@ -683,7 +687,7 @@ class RecExport(RecPeriod):
 def _file_name(name: str, begin: datetime, end: datetime, tz: ZoneInfo, ext: str) -> str:
     b, e = begin.astimezone(tz), end.astimezone(tz)
     span = f"{b:%Y-%m-%d %H-%M-%S} - " + (f"{e:%H-%M-%S}" if b.date() == e.date() else f"{e:%Y-%m-%d %H-%M-%S}")
-    clean = "".join(ch for ch in name if ch not in '\/:*?"<>|').strip() or "recording"
+    clean = "".join(ch for ch in name if ch not in '\\/:*?"<>|').strip() or "recording"
     return f"{clean} {span}.{ext}"
 
 
@@ -1020,13 +1024,18 @@ async def api_report_markers(
 
 # --- MultiProbe servers -----------------------------------------------------------------------
 
-def _server_out(srv: dict, session: sessions.Session) -> dict:
+def _server_out(srv: dict, session: sessions.Session, kept: dict[int, str], jobs_kept: dict[int, str]) -> dict:
     conn = session.conns.get(srv["id"])
-    return {
+    out = {
         "id": srv["id"], "name": srv["name"], "url": srv["url"], "verify_tls": srv["verify_tls"],
         "connected": conn is not None, "login": session.logins.get(srv["id"]) if conn else None,
         "added_by": srv.get("created_by_name", ""),
+        "remembered": kept.get(srv["id"]),  # login whose password is kept for this user
+        "auto_error": session.auto_errors.get(srv["id"]),
     }
+    if session.is_admin:
+        out["job_login"] = jobs_kept.get(srv["id"])
+    return out
 
 
 @app.get("/servers", response_class=HTMLResponse)
@@ -1037,7 +1046,9 @@ async def servers_page(request: Request, session: sessions.Session = Depends(cur
 
 @app.get("/api/servers")
 async def api_servers(session: sessions.Session = Depends(current_session)):
-    return {"servers": [_server_out(s, session) for s in storage.list_servers()], "is_admin": session.is_admin}
+    kept, jobs_kept = storage.credential_logins(session.user_id), storage.credential_logins(storage.JOBS)
+    return {"servers": [_server_out(s, session, kept, jobs_kept) for s in storage.list_servers()],
+            "is_admin": session.is_admin}
 
 
 class ServerIn(BaseModel):
@@ -1083,18 +1094,55 @@ async def api_server_delete(server_id: int, session: sessions.Session = Depends(
 class ConnectIn(BaseModel):
     login: str = Field(min_length=1)
     password: str
+    remember: bool = False  # keep the password (encrypted) and connect by itself from now on
 
 
-@app.post("/api/servers/{server_id}/connect")
-async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
-                             session: sessions.Session = Depends(current_session)):
-    """Sign in to another MultiProbe server with an account of that server. The password is not kept."""
-    srv = storage.get_server(server_id)
-    if srv is None:
-        raise HTTPException(404, "Server not found")
-    t = i18n.translator(i18n.pick_lang(request))
+def _renewer(owner: str, srv: dict):
+    """Signs in again with the kept password when MultiProbe stops accepting the token."""
+    async def renew() -> str:
+        cred = storage.get_credential(owner, srv["id"])
+        if cred is None:
+            raise mp_client.MPAuthError("noCredential", "No password is kept")
+        token, _ = await mp_client.login(srv["url"], cred[0], cred[1], srv["verify_tls"])
+        return token
+    return renew
+
+
+def _attach(session: sessions.Session, srv: dict, login: str, token: str, profile: dict) -> None:
+    session.conns[srv["id"]] = mp_client.Conn(srv["id"], srv["name"], srv["url"], token, srv["verify_tls"],
+                                              renew=_renewer(session.user_id, srv))
+    session.logins[srv["id"]] = login
+    session.auto_errors.pop(srv["id"], None)
+    # No time zone chosen yet: take the one this MultiProbe account uses.
+    mp_tz = (profile.get("timeZoneSettings") or {}).get("timeZone")
+    if not session.user.get("time_zone") and mp_tz:
+        storage.update_user(session.user["id"], time_zone=mp_tz)
+        sessions.update_user(storage.get_user(session.user["id"]))
+
+
+AUTO_CONNECT_TIMEOUT = 10  # seconds per server; a server that is away must not hold up the sign-in
+
+
+async def _auto_connect(session: sessions.Session) -> None:
+    servers = {s["id"]: s for s in storage.list_servers()}
+
+    async def one(server_id: int) -> None:
+        srv, cred = servers.get(server_id), storage.get_credential(session.user_id, server_id)
+        if srv is None or cred is None:
+            return
+        try:
+            token, profile = await asyncio.wait_for(
+                mp_client.login(srv["url"], cred[0], cred[1], srv["verify_tls"]), AUTO_CONNECT_TIMEOUT)
+            _attach(session, srv, cred[0], token, profile)
+        except (mp_client.MPError, asyncio.TimeoutError) as exc:
+            session.auto_errors[server_id] = getattr(exc, "message", "") or exc.__class__.__name__
+
+    await asyncio.gather(*(one(sid) for sid in storage.credential_logins(session.user_id)))
+
+
+async def _check_login(srv: dict, body: ConnectIn, t) -> tuple[str, dict]:
     try:
-        token, profile = await mp_client.login(srv["url"], body.login, body.password, srv["verify_tls"])
+        return await mp_client.login(srv["url"], body.login, body.password, srv["verify_tls"])
     except mp_client.MPAuthError as exc:
         msg = {"authErrorUserDisabled": t("err_user_disabled"), "authErrorUserBanned": t("err_user_banned")}.get(
             exc.code, t("err_wrong_credentials"))
@@ -1104,13 +1152,50 @@ async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
             # A web server answered, not the MultiProbe API (e.g. nginx serving the web interface).
             raise HTTPException(502, t("err_not_api", url=srv["url"]))
         raise HTTPException(502, t("err_server_unreachable", msg=exc.message[:200]))
-    session.conns[server_id] = mp_client.Conn(server_id, srv["name"], srv["url"], token, srv["verify_tls"])
-    session.logins[server_id] = body.login
-    # No time zone chosen yet: take the one this MultiProbe account uses.
-    mp_tz = (profile.get("timeZoneSettings") or {}).get("timeZone")
-    if not session.user.get("time_zone") and mp_tz:
-        storage.update_user(session.user["id"], time_zone=mp_tz)
-        sessions.update_user(storage.get_user(session.user["id"]))
+
+
+def _server_or_404(server_id: int) -> dict:
+    srv = storage.get_server(server_id)
+    if srv is None:
+        raise HTTPException(404, "Server not found")
+    return srv
+
+
+@app.post("/api/servers/{server_id}/connect")
+async def api_server_connect(server_id: int, body: ConnectIn, request: Request,
+                             session: sessions.Session = Depends(current_session)):
+    """Sign in to a MultiProbe server with an account of that server. The password is kept (encrypted)
+    only when the user asks for it."""
+    srv = _server_or_404(server_id)
+    token, profile = await _check_login(srv, body, i18n.translator(i18n.pick_lang(request)))
+    _attach(session, srv, body.login, token, profile)
+    if body.remember:
+        storage.save_credential(session.user_id, server_id, body.login, body.password)
+    else:
+        storage.delete_credential(session.user_id, server_id)
+    return {"ok": True}
+
+
+@app.post("/api/servers/{server_id}/forget")
+async def api_server_forget(server_id: int, session: sessions.Session = Depends(current_session)):
+    """Stop keeping this user's password for the server (the current connection stays)."""
+    storage.delete_credential(session.user_id, server_id)
+    return {"ok": True}
+
+
+@app.put("/api/servers/{server_id}/job-account")
+async def api_server_job_account(server_id: int, body: ConnectIn, request: Request,
+                                 session: sessions.Session = Depends(admin_session)):
+    """The MultiProbe account scheduled jobs use on this server. Checked by signing in before it is kept."""
+    srv = _server_or_404(server_id)
+    await _check_login(srv, body, i18n.translator(i18n.pick_lang(request)))
+    storage.save_credential(storage.JOBS, server_id, body.login, body.password)
+    return {"ok": True}
+
+
+@app.delete("/api/servers/{server_id}/job-account")
+async def api_server_job_account_delete(server_id: int, session: sessions.Session = Depends(admin_session)):
+    storage.delete_credential(storage.JOBS, server_id)
     return {"ok": True}
 
 

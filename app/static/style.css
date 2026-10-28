@@ -362,3 +362,7 @@ p.notice { margin: 0 0 8px; }
 .rec-bar { height: 8px; background: #e7ebf1; border-radius: 4px; overflow: hidden; margin: 6px 0; }
 .rec-export-state { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 900px) { .rec-grid { grid-template-columns: 1fr; } .rec-pick select { min-width: 0; width: 100%; } }
+
+/* Small print under a value (servers page) */
+.small { font-size: 12px; }
+.error.small { padding: 4px 8px; margin-top: 4px; }

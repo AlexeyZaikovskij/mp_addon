@@ -5,6 +5,7 @@
   let servers = [];
   let isAdmin = false;
   let connecting = null;
+  let connectMode = "user"; // "user": connect myself; "jobs": the account for scheduled jobs (administrators)
 
   const escapeHtml = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -37,7 +38,15 @@
         <td class="mono">${escapeHtml(s.url)}${s.verify_tls ? "" : ` <span class="tag warn">${escapeHtml(T.srv_insecure_tag)}</span>`}</td>
         <td>${s.connected
           ? `<span class="srv-on">● ${escapeHtml(T.srv_connected)}</span> <span class="muted">${escapeHtml(s.login || "")}</span>`
-          : `<span class="muted">○ ${escapeHtml(T.srv_not_connected)}</span>`}</td>
+          : `<span class="muted">○ ${escapeHtml(T.srv_not_connected)}</span>`}
+          ${s.remembered ? `<div class="muted small">${escapeHtml(T.srv_remembered.replace("{login}", s.remembered))}
+            <button type="button" class="link" data-act="forget">${escapeHtml(T.srv_forget)}</button></div>` : ""}
+          ${s.auto_error && !s.connected ? `<div class="error small">${escapeHtml(T.srv_auto_failed)}: ${escapeHtml(s.auto_error)}</div>` : ""}</td>
+        ${isAdmin ? `<td>${s.job_login ? `${escapeHtml(s.job_login)}
+            <button type="button" class="link" data-act="jobs">${escapeHtml(T.tpl_edit)}</button>
+            <button type="button" class="link danger" data-act="jobs-delete">${escapeHtml(T.tpl_delete)}</button>`
+          : `<span class="muted">${escapeHtml(T.srv_jobs_none)}</span>
+            <button type="button" class="link" data-act="jobs">${escapeHtml(T.srv_jobs_set)}</button>`}</td>` : ""}
         <td class="actions-cell">
           ${s.connected
             ? `<button type="button" class="link" data-act="disconnect">${escapeHtml(T.srv_disconnect)}</button>`
@@ -82,11 +91,17 @@
   });
 
   // --- Connect ---------------------------------------------------------------------
-  function openConnect(srv) {
+  function openConnect(srv, mode = "user") {
     if (!srv) return;
     connecting = srv;
-    $("#connect-title").textContent = T.srv_connect_to.replace("{name}", srv.name);
-    $("#c-login").value = "";
+    connectMode = mode;
+    const jobs = mode === "jobs";
+    $("#connect-title").textContent = (jobs ? T.srv_jobs_title : T.srv_connect_to).replace("{name}", srv.name);
+    $("#connect-submit").textContent = jobs ? T.tpl_save : T.srv_connect;
+    $("#c-remember-wrap").hidden = jobs;
+    $("#c-remember-hint").textContent = jobs ? T.srv_jobs_hint : T.srv_remember_hint;
+    $("#c-remember").checked = !!srv.remembered;
+    $("#c-login").value = jobs ? (srv.job_login || "") : (srv.remembered || "");
     $("#c-password").value = "";
     $("#connect-error").hidden = true;
     $("#connect").hidden = false;
@@ -98,11 +113,16 @@
     const btn = e.submitter;
     btn.disabled = true;
     try {
-      await api(`/api/servers/${connecting.id}/connect`, "POST", { login: $("#c-login").value.trim(), password: $("#c-password").value });
+      const body = { login: $("#c-login").value.trim(), password: $("#c-password").value };
+      if (connectMode === "jobs") {
+        await api(`/api/servers/${connecting.id}/job-account`, "PUT", body);
+      } else {
+        await api(`/api/servers/${connecting.id}/connect`, "POST", { ...body, remember: $("#c-remember").checked });
+      }
       $("#c-password").value = "";
       $("#connect").hidden = true;
       await reload();
-      message(T.srv_connected_to.replace("{name}", connecting.name));
+      message((connectMode === "jobs" ? T.srv_jobs_saved : T.srv_connected_to).replace("{name}", connecting.name));
     } catch (err) {
       $("#connect-error").hidden = false;
       $("#connect-error").textContent = err.message;
@@ -120,6 +140,13 @@
       if (b.dataset.act === "connect") openConnect(srv);
       else if (b.dataset.act === "edit") openForm(srv);
       else if (b.dataset.act === "disconnect") { await api(`/api/servers/${srv.id}/disconnect`, "POST"); await reload(); }
+      else if (b.dataset.act === "forget") { await api(`/api/servers/${srv.id}/forget`, "POST"); await reload(); }
+      else if (b.dataset.act === "jobs") openConnect(srv, "jobs");
+      else if (b.dataset.act === "jobs-delete") {
+        if (!confirm(T.srv_jobs_delete_confirm.replace("{name}", srv.name))) return;
+        await api(`/api/servers/${srv.id}/job-account`, "DELETE");
+        await reload();
+      }
       else if (b.dataset.act === "delete") {
         if (!confirm(T.srv_delete_confirm.replace("{name}", srv.name))) return;
         await api(`/api/servers/${srv.id}`, "DELETE");

@@ -29,9 +29,7 @@
   // arithmetic on them goes through UTC so the browser's own zone does not interfere.
   const toMs = (s) => Date.parse(`${s.length === 16 ? s + ":00" : s}Z`);
   const fromMs = (ms) => new Date(ms).toISOString().slice(0, 19);
-  const dayStart = () => toMs(`${$("#day").value}T00:00:00`);
-  const hms = (sec) => [Math.floor(sec / 3600), Math.floor(sec % 3600 / 60), Math.floor(sec % 60)]
-    .map((v) => String(v).padStart(2, "0")).join(":");
+  const midnight = (ms) => ms - (ms % (DAY * 1000));
 
   let tasks = [];
   let task = null;
@@ -56,9 +54,8 @@
     loadServices();
     // Default piece: 5 minutes ending 2 minutes ago (the most recent minutes are not written yet).
     const end = toMs(nowStr) - 120_000;
-    $("#day").value = fromMs(end).slice(0, 10);
     setPeriod(end - 300_000, end);
-    loadTimeline();
+    centerOn(end - 150_000);
   }
 
   $("#task").addEventListener("change", () => { task = tasks[Number($("#task").value)]; loadTimeline(); loadServices(); });
@@ -99,14 +96,36 @@
   $("#service").addEventListener("change", renderTracks);
 
   // --- Timeline -------------------------------------------------------------------------------------------
+  // The timeline shows a window of `span` seconds from `winStart` (ms, see toMs): a whole day, or a zoom of
+  // a few hours or minutes, which makes picking a 5-minute piece practical.
+  const TICK = { 86400: 3 * 3600, 21600: 3600, 3600: 600, 900: 180 };
+  let span = 3600;
+  let winStart = 0;
   let intervals = [];
   let nowSec = null;
   let tlSeq = 0;
 
+  function markSpan() {
+    for (const b of document.querySelectorAll("#spans button")) b.classList.toggle("active", Number(b.dataset.sec) === span);
+  }
+
+  // Put the window around a moment: the day for 24 h, otherwise aligned to a tick so the labels stay round.
+  function centerOn(ms) {
+    if (span === DAY) winStart = midnight(ms);
+    else {
+      const step = TICK[span] * 1000;
+      winStart = Math.floor((ms - span * 500) / step) * step;
+    }
+    loadTimeline();
+  }
+
   async function loadTimeline() {
-    if (!task || !$("#day").value) return;
+    markSpan();
+    $("#day").value = fromMs(winStart).slice(0, 10);
+    renderTimeline();
+    if (!task) return;
     const seq = ++tlSeq;
-    const q = new URLSearchParams({ server_id: task.server_id, task_id: task.task_id, day: $("#day").value });
+    const q = new URLSearchParams({ server_id: task.server_id, task_id: task.task_id, start: fromMs(winStart), seconds: span });
     try {
       const data = await api(`/api/rec/timeline?${q}`);
       if (seq !== tlSeq) return;
@@ -118,37 +137,68 @@
     }
   }
 
+  const kind = (iv) => !iv ? "none" : iv.media ? "media" : LOSS.has(iv.status) ? "loss" : "none";
+
   function renderTimeline() {
-    const pct = (s) => `${(100 * Math.min(Math.max(s, 0), DAY) / DAY).toFixed(3)}%`;
-    const bars = intervals.map((iv) => {
-      const cls = iv.media ? "rec-media" : LOSS.has(iv.status) ? "rec-loss" : "rec-none";
-      const tip = `${hms(iv.from)} – ${hms(iv.to)}: ${iv.status}${iv.storage ? ` (${iv.storage})` : ""}`;
-      return `<div class="rec-iv ${cls}" style="left:${pct(iv.from)};width:calc(${pct(iv.to)} - ${pct(iv.from)})" title="${escapeHtml(tip)}"></div>`;
-    }).join("");
-    const from = (toMs($("#from").value) - dayStart()) / 1000, to = (toMs($("#to").value) - dayStart()) / 1000;
-    const sel = Number.isFinite(from) && Number.isFinite(to) && to > 0 && from < DAY
+    const pct = (sec) => `${(100 * Math.min(Math.max(sec, 0), span) / span).toFixed(3)}%`;
+    const bars = intervals.map((iv) =>
+      `<div class="rec-iv rec-${kind(iv)}" style="left:${pct(iv.from)};width:calc(${pct(iv.to)} - ${pct(iv.from)})"></div>`).join("");
+    const from = (toMs($("#from").value) - winStart) / 1000, to = (toMs($("#to").value) - winStart) / 1000;
+    const sel = Number.isFinite(from) && Number.isFinite(to) && to > 0 && from < span
       ? `<div class="rec-sel" style="left:${pct(from)};width:calc(${pct(to)} - ${pct(from)})"></div>` : "";
     const now = nowSec !== null ? `<div class="rec-now" style="left:${pct(nowSec)}"></div>` : "";
     $("#tl").innerHTML = bars + sel + now;
-    $("#ticks").innerHTML = [0, 3, 6, 9, 12, 15, 18, 21, 24]
-      .map((h) => `<span style="left:${pct(h * 3600)}">${String(h).padStart(2, "0")}:00</span>`).join("");
+    const ticks = [];
+    for (let sec = 0; sec <= span; sec += TICK[span]) ticks.push(`<span style="left:${pct(sec)}">${fromMs(winStart + sec * 1000).slice(11, 16)}</span>`);
+    $("#ticks").innerHTML = ticks.join("");
   }
 
-  $("#tl").addEventListener("click", (e) => {
+  const secAt = (e) => {
     const r = $("#tl").getBoundingClientRect();
-    const sec = Math.round(DAY * (e.clientX - r.left) / r.width);
+    return Math.min(Math.max(span * (e.clientX - r.left) / r.width, 0), span);
+  };
+
+  $("#tl").addEventListener("click", (e) => {
     const length = Math.max(60_000, toMs($("#to").value) - toMs($("#from").value) || 300_000);
-    const begin = dayStart() + sec * 1000;
+    const begin = winStart + Math.round(secAt(e)) * 1000;
     setPeriod(begin, begin + length);
   });
 
-  function shiftDay(days) {
-    $("#day").value = fromMs(dayStart() + days * DAY * 1000).slice(0, 10);
-    loadTimeline();
+  // Tooltip at the cursor: the time there and what the recording has at that moment (as in the legend).
+  const tip = $("#tl-tip");
+  const LABEL = { media: T.rec_legend_media, loss: T.rec_legend_loss, none: T.rec_legend_none };
+  $("#tl").addEventListener("mousemove", (e) => {
+    const sec = secAt(e);
+    const iv = intervals.find((x) => x.from <= sec && sec < x.to);
+    const k = kind(iv);
+    const lines = [fromMs(winStart + Math.floor(sec) * 1000).replace("T", " "),
+      `${LABEL[k]}${iv && !iv.media && iv.status ? ` (${iv.status})` : ""}`];
+    const from = (toMs($("#from").value) - winStart) / 1000, to = (toMs($("#to").value) - winStart) / 1000;
+    if (from <= sec && sec < to) lines.push(T.rec_legend_selected);
+    tip.textContent = lines.join("\n");
+    tip.hidden = false;
+    const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    const y = e.clientY + 16 + tip.offsetHeight > window.innerHeight ? e.clientY - tip.offsetHeight - 10 : e.clientY + 16;
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+  });
+  $("#tl").addEventListener("mouseleave", () => { tip.hidden = true; });
+
+  for (const b of document.querySelectorAll("#spans button")) {
+    b.addEventListener("click", () => {
+      span = Number(b.dataset.sec);
+      const from = toMs($("#from").value), to = toMs($("#to").value);
+      centerOn(Number.isFinite(from) && Number.isFinite(to) ? (from + to) / 2 : winStart + span * 500);
+    });
   }
-  $("#day").addEventListener("change", loadTimeline);
-  $("#day-prev").addEventListener("click", () => shiftDay(-1));
-  $("#day-next").addEventListener("click", () => shiftDay(1));
+  $("#day").addEventListener("change", () => {
+    const day = toMs(`${$("#day").value}T00:00:00`);
+    if (!Number.isFinite(day)) return;
+    winStart = day + (span === DAY ? 0 : winStart - midnight(winStart));  // same time of day, other date
+    loadTimeline();
+  });
+  $("#day-prev").addEventListener("click", () => { winStart -= span * 1000; loadTimeline(); });
+  $("#day-next").addEventListener("click", () => { winStart += span * 1000; loadTimeline(); });
 
   // --- Period ---------------------------------------------------------------------------------------------
   function setPeriod(beginMs, endMs) {
@@ -163,21 +213,22 @@
     for (const b of document.querySelectorAll("#lengths button")) b.classList.toggle("active", Number(b.dataset.min) === min);
   }
 
+  // A piece typed in or lengthened beyond the visible window brings the window to it.
+  function followPeriod() {
+    const from = toMs($("#from").value), to = toMs($("#to").value);
+    markLength();
+    if (Number.isFinite(from) && (from < winStart || from >= winStart + span * 1000)) centerOn(Number.isFinite(to) ? (from + to) / 2 : from);
+    else renderTimeline();
+  }
+
   for (const b of document.querySelectorAll("#lengths button")) {
     b.addEventListener("click", () => {
       const begin = toMs($("#from").value);
       if (Number.isFinite(begin)) setPeriod(begin, begin + Number(b.dataset.min) * 60_000);
     });
   }
-  $("#from").addEventListener("change", () => {
-    const begin = toMs($("#from").value);
-    if (!Number.isFinite(begin)) return;
-    const day = fromMs(begin).slice(0, 10);
-    if (day !== $("#day").value) { $("#day").value = day; loadTimeline(); }
-    markLength();
-    renderTimeline();
-  });
-  $("#to").addEventListener("change", () => { markLength(); renderTimeline(); });
+  $("#from").addEventListener("change", followPeriod);
+  $("#to").addEventListener("change", followPeriod);
 
   function period() {
     const begin = $("#from").value, end = $("#to").value;

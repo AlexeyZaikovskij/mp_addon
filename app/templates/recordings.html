@@ -14,9 +14,17 @@
     <label id="service-wrap" hidden>{{ t("rec_service") }}<br><select id="service"></select></label>
     <label>{{ t("rec_day") }}<br>
       <span class="rec-day">
-        <button type="button" class="btn small" id="day-prev" title="{{ t('rec_prev_day') }}">◀</button>
+        <button type="button" class="btn small" id="day-prev" title="{{ t('rec_prev_window') }}">◀</button>
         <input type="date" id="day">
-        <button type="button" class="btn small" id="day-next" title="{{ t('rec_next_day') }}">▶</button>
+        <button type="button" class="btn small" id="day-next" title="{{ t('rec_next_window') }}">▶</button>
+      </span>
+    </label>
+    <label>{{ t("rec_scale") }}<br>
+      <span class="presets" id="spans">
+        <button type="button" data-sec="86400">{{ t("rec_span_24h") }}</button>
+        <button type="button" data-sec="21600">{{ t("rec_span_6h") }}</button>
+        <button type="button" data-sec="3600">{{ t("rec_hour") }}</button>
+        <button type="button" data-sec="900">{{ t("rec_min", n=15) }}</button>
       </span>
     </label>
   </div>
@@ -32,6 +40,7 @@
     </div>
     <p class="muted note">{{ t("rec_timeline_hint") }}</p>
   </div>
+  <div class="tip" id="tl-tip" hidden></div>
 
   <div class="period rec-period" id="period" hidden>
     <label>{{ t("rec_from") }}<br><input type="datetime-local" step="1" id="from"></label>

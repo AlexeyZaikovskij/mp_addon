@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -601,20 +601,18 @@ async def api_rec_tasks(session: sessions.Session = Depends(current_session)):
 
 
 @app.get("/api/rec/timeline")
-async def api_rec_timeline(server_id: int, task_id: str, day: str, session: sessions.Session = Depends(current_session)):
-    """Recording intervals of one day (the user's time zone), as seconds from midnight."""
-    tz = _user_tz(session)
-    try:
-        start = _to_utc(datetime.strptime(day, "%Y-%m-%d"), tz)
-    except ValueError:
-        raise HTTPException(422, "day must be YYYY-MM-DD")
-    end = start + timedelta(days=1)
-    rows = await recordings.timeline(session.conn(server_id), task_id, start, end)
-    sec = lambda v: round((v - start).total_seconds())
+async def api_rec_timeline(server_id: int, task_id: str, start: datetime, seconds: int = Query(86400, ge=60, le=2 * 86400),
+                           session: sessions.Session = Depends(current_session)):
+    """Recording intervals in a window of the timeline: `start` naive in the user's time zone, `seconds` long.
+    Positions are seconds from the start of the window."""
+    begin = _to_utc(start, _user_tz(session))
+    end = begin + timedelta(seconds=seconds)
+    rows = await recordings.timeline(session.conn(server_id), task_id, begin, end)
+    sec = lambda v: round((v - begin).total_seconds(), 1)
     now = datetime.now(timezone.utc)
     return {"intervals": [{"from": sec(r["begin"]), "to": sec(r["end"]), "status": r["status"], "media": r["media"],
                            "storage": r["storage"]} for r in rows],
-            "now": sec(now) if start <= now < end else None}
+            "now": sec(now) if begin <= now < end else None}
 
 
 @app.get("/api/rec/services")

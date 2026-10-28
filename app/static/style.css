@@ -366,3 +366,29 @@ p.notice { margin: 0 0 8px; }
 /* Small print under a value (servers page) */
 .small { font-size: 12px; }
 .error.small { padding: 4px 8px; margin-top: 4px; }
+
+/* Scheduled exports */
+.sch-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+.sch-grid { display: flex; gap: 16px 20px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 12px; }
+.sch-grid label, .sch-label { color: var(--muted); font-size: 13px; }
+.sch-grid input, .sch-grid select { margin-top: 4px; }
+.sch-grid select { min-width: 220px; }
+.sch-path input { min-width: 380px; }
+.sch-kind { margin-bottom: 12px; }
+.sch-job { border-top: 1px solid var(--border); padding: 12px 0; }
+.sch-job:first-child { border-top: 0; padding-top: 0; }
+.sch-job.off .sch-job-main > b { color: var(--muted); }
+.sch-job-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sch-job-main { display: flex; flex-direction: column; gap: 2px; }
+.sch-job-actions { display: flex; gap: 12px; align-items: center; }
+.sch-last, .sch-run-head { margin-top: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sch-runs { margin-top: 8px; }
+.sch-run { margin: 8px 0 0 12px; padding-left: 10px; border-left: 3px solid var(--border); }
+.sch-pieces { margin-top: 6px; font-size: 12px; }
+.sch-pieces td { padding: 3px 8px; }
+.sch-st { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #eceff3; color: #4f5868; }
+.sch-st-running { background: #e2edff; color: #1d4fa8; }
+.sch-st-done { background: #e3f4e6; color: #1e6b2a; }
+.sch-st-partial { background: #fff0d9; color: #9a5300; }
+.sch-st-failed { background: #fde2e2; color: #a12626; }
+span.bad { color: #a12626; font-weight: 600; }

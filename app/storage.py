@@ -50,6 +50,45 @@ CREATE TABLE IF NOT EXISTS mp_credential (
     updated     TEXT NOT NULL,
     PRIMARY KEY (owner, server_id)
 );
+CREATE TABLE IF NOT EXISTS export_folder (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    path        TEXT NOT NULL UNIQUE,
+    created     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS export_job (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    owner_id    TEXT NOT NULL,
+    owner_name  TEXT NOT NULL,
+    params      TEXT NOT NULL,      -- JSON: server, task, channel, PIDs, formats, folder, chunk, schedule
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    next_run    TEXT,               -- UTC; NULL = not planned (a one-time job that has run)
+    created     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS export_run (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER NOT NULL,
+    period_begin TEXT NOT NULL,     -- UTC
+    period_end  TEXT NOT NULL,
+    state       TEXT NOT NULL,      -- running | done | partial | failed | cancelled
+    created     TEXT NOT NULL,
+    finished    TEXT
+);
+CREATE TABLE IF NOT EXISTS export_piece (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL,
+    begin       TEXT NOT NULL,      -- UTC
+    end         TEXT NOT NULL,
+    format      TEXT NOT NULL,      -- mp4 | mp3
+    state       TEXT NOT NULL,      -- pending | running | done | skipped | failed | cancelled
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    file        TEXT,
+    size        INTEGER,
+    error       TEXT,
+    updated     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS export_piece_run ON export_piece (run_id);
 CREATE TABLE IF NOT EXISTS kv (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -253,6 +292,175 @@ def delete_credential(owner: str, server_id: int | None = None) -> None:
             conn.execute("DELETE FROM mp_credential WHERE owner = ?", (owner,))
         else:
             conn.execute("DELETE FROM mp_credential WHERE owner = ? AND server_id = ?", (owner, server_id))
+
+
+# --- Scheduled exports: folders (administrators), jobs, their runs and the pieces of a run ----------
+
+def list_folders() -> list[dict[str, Any]]:
+    with closing(_connect()) as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM export_folder ORDER BY name COLLATE NOCASE")]
+
+
+def get_folder(folder_id: int) -> dict[str, Any] | None:
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT * FROM export_folder WHERE id = ?", (folder_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_folder(name: str, path: str) -> int:
+    with closing(_connect()) as conn, conn:
+        return int(conn.execute("INSERT INTO export_folder (name, path, created) VALUES (?, ?, ?)",
+                                (name, path, _now())).lastrowid)
+
+
+def delete_folder(folder_id: int) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute("DELETE FROM export_folder WHERE id = ?", (folder_id,))
+
+
+def _job(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    d["params"] = json.loads(d["params"])
+    d["enabled"] = bool(d["enabled"])
+    return d
+
+
+def list_jobs(owner_id: str | None = None) -> list[dict[str, Any]]:
+    """All jobs (owner_id None, for administrators) or one user's."""
+    with closing(_connect()) as conn:
+        if owner_id is None:
+            rows = conn.execute("SELECT * FROM export_job ORDER BY id DESC").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM export_job WHERE owner_id = ? ORDER BY id DESC", (owner_id,)).fetchall()
+    return [_job(r) for r in rows]
+
+
+def get_job(job_id: int) -> dict[str, Any] | None:
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT * FROM export_job WHERE id = ?", (job_id,)).fetchone()
+    return _job(row) if row else None
+
+
+def create_job(name: str, owner_id: str, owner_name: str, params: dict, next_run: str | None) -> int:
+    with closing(_connect()) as conn, conn:
+        return int(conn.execute(
+            "INSERT INTO export_job (name, owner_id, owner_name, params, next_run, created) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, owner_id, owner_name, json.dumps(params), next_run, _now())).lastrowid)
+
+
+def update_job(job_id: int, **fields: Any) -> None:
+    allowed = {"name", "enabled", "next_run", "params"}
+    sets = {k: (int(v) if k == "enabled" else json.dumps(v) if k == "params" else v)
+            for k, v in fields.items() if k in allowed}
+    if sets:
+        with closing(_connect()) as conn, conn:
+            conn.execute(f"UPDATE export_job SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+                         (*sets.values(), job_id))
+
+
+def delete_job(job_id: int) -> None:
+    with closing(_connect()) as conn, conn:
+        runs = [r["id"] for r in conn.execute("SELECT id FROM export_run WHERE job_id = ?", (job_id,))]
+        conn.executemany("DELETE FROM export_piece WHERE run_id = ?", [(r,) for r in runs])
+        conn.execute("DELETE FROM export_run WHERE job_id = ?", (job_id,))
+        conn.execute("DELETE FROM export_job WHERE id = ?", (job_id,))
+
+
+def due_jobs(now_utc: str) -> list[dict[str, Any]]:
+    with closing(_connect()) as conn:
+        rows = conn.execute("SELECT * FROM export_job WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?",
+                            (now_utc,)).fetchall()
+    return [_job(r) for r in rows]
+
+
+def create_run(job_id: int, begin: str, end: str, pieces: list[tuple[str, str, str]]) -> int:
+    """pieces: (begin, end, format), UTC."""
+    now = _now()
+    with closing(_connect()) as conn, conn:
+        run_id = int(conn.execute(
+            "INSERT INTO export_run (job_id, period_begin, period_end, state, created) VALUES (?, ?, ?, 'running', ?)",
+            (job_id, begin, end, now)).lastrowid)
+        conn.executemany(
+            "INSERT INTO export_piece (run_id, begin, end, format, state, updated) VALUES (?, ?, ?, ?, 'pending', ?)",
+            [(run_id, b, e, f, now) for b, e, f in pieces])
+    return run_id
+
+
+def list_runs(job_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    with closing(_connect()) as conn:
+        runs = [dict(r) for r in conn.execute(
+            "SELECT * FROM export_run WHERE job_id = ? ORDER BY id DESC LIMIT ?", (job_id, limit))]
+        for r in runs:
+            r["pieces"] = [dict(p) for p in conn.execute(
+                "SELECT * FROM export_piece WHERE run_id = ? ORDER BY begin, format", (r["id"],))]
+    return runs
+
+
+def get_run(run_id: int) -> dict[str, Any] | None:
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT * FROM export_run WHERE id = ?", (run_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def next_piece() -> dict[str, Any] | None:
+    """The oldest piece waiting, in the order runs were created."""
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT p.*, r.job_id FROM export_piece p JOIN export_run r ON r.id = p.run_id"
+            " WHERE p.state = 'pending' AND r.state = 'running' ORDER BY r.id, p.begin, p.format LIMIT 1").fetchone()
+    return dict(row) if row else None
+
+
+def update_piece(piece_id: int, **fields: Any) -> None:
+    allowed = {"state", "attempts", "file", "size", "error"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    sets["updated"] = _now()
+    with closing(_connect()) as conn, conn:
+        conn.execute(f"UPDATE export_piece SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+                     (*sets.values(), piece_id))
+
+
+def set_pieces_state(run_id: int, from_states: tuple[str, ...], to_state: str) -> int:
+    marks = ",".join("?" * len(from_states))
+    with closing(_connect()) as conn, conn:
+        return conn.execute(f"UPDATE export_piece SET state = ?, updated = ? WHERE run_id = ? AND state IN ({marks})",
+                            (to_state, _now(), run_id, *from_states)).rowcount
+
+
+def reset_running_pieces() -> None:
+    """After a restart: pieces that were being exported start again."""
+    with closing(_connect()) as conn, conn:
+        conn.execute("UPDATE export_piece SET state = 'pending' WHERE state = 'running'")
+
+
+def finish_run_if_done(run_id: int) -> str | None:
+    """Close a run when no piece is left to do; returns its final state."""
+    with closing(_connect()) as conn, conn:
+        counts = dict(conn.execute("SELECT state, COUNT(*) FROM export_piece WHERE run_id = ? GROUP BY state",
+                                   (run_id,)).fetchall())
+        if counts.get("pending") or counts.get("running"):
+            return None
+        state = ("cancelled" if counts.get("cancelled") else "failed" if counts.get("failed") and not counts.get("done")
+                 else "partial" if counts.get("failed") else "done")
+        conn.execute("UPDATE export_run SET state = ?, finished = ? WHERE id = ? AND state = 'running'",
+                     (state, _now(), run_id))
+        return state
+
+
+def retry_failed(run_id: int) -> int:
+    """Failed pieces of a run get their attempts back and wait again."""
+    with closing(_connect()) as conn, conn:
+        n = conn.execute("UPDATE export_piece SET state = 'pending', attempts = 0, updated = ?"
+                         " WHERE run_id = ? AND state = 'failed'", (_now(), run_id)).rowcount
+        if n:
+            conn.execute("UPDATE export_run SET state = 'running', finished = NULL WHERE id = ?", (run_id,))
+    return n
+
+
+def set_run_state(run_id: int, state: str) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute("UPDATE export_run SET state = ?, finished = CASE WHEN ? = 'running' THEN NULL ELSE ? END"
+                     " WHERE id = ?", (state, state, _now(), run_id))
 
 
 # --- Toolkit users ----------------------------------------------------------------------------

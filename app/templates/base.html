@@ -22,6 +22,7 @@
           <a href="/reports" class="{{ 'active' if path.startswith('/report') }}">{{ t("nav_reports") }}</a>
           <a href="/templates" class="{{ 'active' if path == '/templates' }}">{{ t("nav_templates") }}</a>
           <a href="/recordings" class="{{ 'active' if path == '/recordings' }}">{{ t("nav_recordings") }}</a>
+          <a href="/schedule" class="{{ 'active' if path == '/schedule' }}">{{ t("nav_schedule") }}</a>
           <a href="/servers" class="{{ 'active' if path == '/servers' }}">{{ t("nav_servers") }}</a>
           {% if session.is_admin %}<a href="/users" class="{{ 'active' if path == '/users' }}">{{ t("nav_users") }}</a>{% endif %}
         </nav>

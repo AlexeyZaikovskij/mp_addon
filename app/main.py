@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, i18n, jobs, mp_client, overview, recordings, sessions, storage
+from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -26,7 +26,9 @@ from .reports import export, pdf, timeline
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     storage.init()
+    worker = asyncio.create_task(scheduler.loop())
     yield
+    worker.cancel()
     await recordings.close()
     await mp_client.close()
 
@@ -719,6 +721,214 @@ async def rec_export_file(job_id: str, session: sessions.Session = Depends(curre
         raise HTTPException(404, "File not found or expired")
     media = "video/mp4" if job.params["format"] == "mp4" else "audio/mpeg"
     return FileResponse(path, media_type=media, filename=job.params["file_name"])
+
+
+# --- Scheduled exports ----------------------------------------------------------
+
+@app.get("/schedule", response_class=HTMLResponse)
+async def schedule_page(request: Request, session: sessions.Session = Depends(current_session)):
+    lang = i18n.pick_lang(request)
+    return render(request, "schedule.html", session=session, strings=i18n.bundle(lang))
+
+
+def _local(value: str | None, tz: ZoneInfo) -> str | None:
+    return datetime.fromisoformat(value).astimezone(tz).strftime("%Y-%m-%d %H:%M") if value else None
+
+
+def _run_out(run: dict, tz: ZoneInfo) -> dict:
+    counts: dict[str, int] = {}
+    for p in run["pieces"]:
+        counts[p["state"]] = counts.get(p["state"], 0) + 1
+    progress = None
+    if scheduler.current and any(p["id"] == scheduler.current.get("piece_id") for p in run["pieces"]):
+        progress = scheduler.current["job"].progress()["percent"]
+    return {
+        "id": run["id"], "state": run["state"], "begin": _local(run["period_begin"], tz),
+        "end": _local(run["period_end"], tz), "created": _local(run["created"], tz),
+        "finished": _local(run["finished"], tz), "counts": counts, "total": len(run["pieces"]), "progress": progress,
+        "pieces": [{"id": p["id"], "begin": _local(p["begin"], tz), "end": _local(p["end"], tz), "format": p["format"],
+                    "state": p["state"], "attempts": p["attempts"], "file": p["file"], "size": p["size"],
+                    "error": p["error"]} for p in run["pieces"]],
+    }
+
+
+def _job_out(job: dict, tz: ZoneInfo, folders: dict[int, dict], with_runs: int) -> dict:
+    p = job["params"]
+    runs = storage.list_runs(job["id"], with_runs)
+    return {
+        "id": job["id"], "name": job["name"], "owner": job["owner_name"], "enabled": job["enabled"],
+        "next_run": _local(job["next_run"], tz), "params": {
+            k: p.get(k) for k in ("kind", "server_id", "server", "task_name", "channel", "formats", "chunk_minutes",
+                                  "run_at", "time_zone")},
+        "period": [_local(p.get("begin"), tz), _local(p.get("end"), tz)] if p["kind"] == "once" else None,
+        "folder": (folders.get(p["folder_id"]) or {}).get("name"),
+        "runs": [_run_out(r, tz) for r in runs],
+    }
+
+
+def _own_job(job_id: int, session: sessions.Session) -> dict:
+    job = storage.get_job(job_id)
+    if job is None or (job["owner_id"] != session.user_id and not session.is_admin):
+        raise HTTPException(404, "Job not found")
+    return job
+
+
+@app.get("/api/schedule")
+async def api_schedule(session: sessions.Session = Depends(current_session)):
+    """The user's jobs (an administrator sees everybody's), the folders and which servers have a job account."""
+    tz = _user_tz(session)
+    folders = {f["id"]: f for f in storage.list_folders()}
+    job_list = storage.list_jobs(None if session.is_admin else session.user_id)
+    return {
+        "jobs": [_job_out(j, tz, folders, 3) for j in job_list],
+        "folders": [{"id": f["id"], "name": f["name"], **({"path": f["path"]} if session.is_admin else {})}
+                    for f in folders.values()],
+        "job_accounts": sorted(storage.credential_logins(storage.JOBS)),
+        "is_admin": session.is_admin, "chunks": list(scheduler.CHUNKS),
+        "now": datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S"), "time_zone": str(tz),
+    }
+
+
+@app.get("/api/schedule/jobs/{job_id}/runs")
+async def api_schedule_runs(job_id: int, session: sessions.Session = Depends(current_session)):
+    job = _own_job(job_id, session)
+    return _job_out(job, _user_tz(session), {f["id"]: f for f in storage.list_folders()}, 20)["runs"]
+
+
+class ScheduleJobIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    server_id: int
+    task_id: str
+    task_name: str = ""
+    channel: str = ""  # the channel's name (a service of a whole-stream recording, or the recording itself)
+    pids: list[int] | None = None
+    audio_pid: int | None = None
+    formats: list[Literal["mp4", "mp3"]] = Field(min_length=1)
+    folder_id: int
+    chunk_minutes: int
+    kind: Literal["once", "daily"]
+    begin: datetime | None = None  # once: the period, naive in the user's time zone
+    end: datetime | None = None
+    start_at: datetime | None = None  # once: when to start; None = right away
+    run_at: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # daily: "HH:MM"
+
+
+@app.post("/api/schedule/jobs")
+async def api_schedule_create(body: ScheduleJobIn, request: Request,
+                              session: sessions.Session = Depends(current_session)):
+    t = i18n.translator(i18n.pick_lang(request))
+    tz = _user_tz(session)
+    srv = _server_or_404(body.server_id)
+    if storage.get_folder(body.folder_id) is None:
+        raise HTTPException(422, t("sch_err_folder"))
+    if body.chunk_minutes not in scheduler.CHUNKS:
+        raise HTTPException(422, "chunk_minutes is not one of the offered lengths")
+    params = {
+        **body.model_dump(exclude={"name", "begin", "end", "start_at"}),
+        "formats": sorted(set(body.formats), key=["mp4", "mp3"].index),
+        "server": srv["name"], "time_zone": str(tz),
+    }
+    now = datetime.now(timezone.utc)
+    if body.kind == "once":
+        if not body.begin or not body.end or body.end <= body.begin:
+            raise HTTPException(422, t("err_period"))
+        begin, end = _to_utc(body.begin, tz), _to_utc(body.end, tz)
+        start = max(_to_utc(body.start_at, tz), now) if body.start_at else now
+        if end > start:
+            raise HTTPException(422, t("sch_err_future"))
+        params |= {"begin": begin.isoformat(), "end": end.isoformat()}
+        next_run = scheduler.utc_iso(start)
+    else:
+        if not body.run_at:
+            raise HTTPException(422, t("sch_err_time"))
+        next_run = scheduler.utc_iso(scheduler.next_daily(body.run_at, tz, now))
+    job_id = storage.create_job(body.name.strip(), session.user_id, session.user_name, params, next_run)
+    scheduler.wake()
+    return {"id": job_id}
+
+
+class ScheduleEnableIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/schedule/jobs/{job_id}/enabled")
+async def api_schedule_enable(job_id: int, body: ScheduleEnableIn, session: sessions.Session = Depends(current_session)):
+    job = _own_job(job_id, session)
+    fields: dict = {"enabled": body.enabled}
+    p = job["params"]
+    if body.enabled and p["kind"] == "daily":  # the next start counts from now, not from when it was paused
+        fields["next_run"] = scheduler.utc_iso(scheduler.next_daily(p["run_at"], scheduler.zone(p["time_zone"]),
+                                                                    datetime.now(timezone.utc)))
+    storage.update_job(job_id, **fields)
+    return {"ok": True}
+
+
+@app.post("/api/schedule/jobs/{job_id}/run")
+async def api_schedule_run_now(job_id: int, session: sessions.Session = Depends(current_session)):
+    """Start the job now (a daily job exports the previous day), apart from its schedule."""
+    job = _own_job(job_id, session)
+    return {"run_id": scheduler.start_run(job)}
+
+
+@app.delete("/api/schedule/jobs/{job_id}")
+async def api_schedule_delete(job_id: int, session: sessions.Session = Depends(current_session)):
+    _own_job(job_id, session)
+    storage.delete_job(job_id)  # a piece being exported finishes; the files already saved stay
+    return {"ok": True}
+
+
+def _own_run(run_id: int, session: sessions.Session) -> dict:
+    run = storage.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    _own_job(run["job_id"], session)
+    return run
+
+
+@app.post("/api/schedule/runs/{run_id}/cancel")
+async def api_schedule_cancel(run_id: int, session: sessions.Session = Depends(current_session)):
+    _own_run(run_id, session)
+    storage.set_pieces_state(run_id, ("pending",), "cancelled")
+    storage.finish_run_if_done(run_id)
+    return {"ok": True}
+
+
+@app.post("/api/schedule/runs/{run_id}/retry")
+async def api_schedule_retry(run_id: int, session: sessions.Session = Depends(current_session)):
+    _own_run(run_id, session)
+    n = storage.retry_failed(run_id)
+    scheduler.wake()
+    return {"retried": n}
+
+
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    path: str = Field(min_length=3, max_length=400)
+
+
+@app.post("/api/schedule/folders")
+async def api_folder_create(body: FolderIn, request: Request, session: sessions.Session = Depends(admin_session)):
+    """A folder scheduled exports may write to. It must exist and accept a file (checked with a test file)."""
+    from pathlib import Path
+    t = i18n.translator(i18n.pick_lang(request))
+    path = Path(body.path.strip())
+    if not path.is_absolute() or not path.is_dir():
+        raise HTTPException(422, t("sch_err_folder_missing"))
+    probe = path / ".mp_toolkit_write_test"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as exc:
+        raise HTTPException(422, t("sch_err_folder_write", msg=str(exc)))
+    if any(f["path"].lower() == str(path).lower() for f in storage.list_folders()):
+        raise HTTPException(409, t("sch_err_folder_dup"))
+    return {"id": storage.create_folder(body.name.strip(), str(path))}
+
+
+@app.delete("/api/schedule/folders/{folder_id}")
+async def api_folder_delete(folder_id: int, session: sessions.Session = Depends(admin_session)):
+    storage.delete_folder(folder_id)
+    return {"ok": True}
 
 
 def _job(job_id: str, session: sessions.Session) -> jobs.Job:

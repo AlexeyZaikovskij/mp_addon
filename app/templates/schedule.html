@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h1>{{ t("nav_schedule") }}</h1>
+    <button type="button" class="btn" id="new-job">+ {{ t("sch_new") }}</button>
+  </div>
+  <p class="muted">{{ t("sch_hint") }}</p>
+  <div id="sch-message" hidden></div>
+
+  <form class="sch-form" id="job-form" hidden autocomplete="off">
+    <div class="sch-grid">
+      <label>{{ t("sch_name") }}<br><input id="f-name" maxlength="120" required></label>
+      <label>{{ t("rec_channel") }}<br><select id="f-task"></select></label>
+      <label id="f-service-wrap" hidden>{{ t("rec_service") }}<br><select id="f-service"></select></label>
+      <label id="f-track-wrap" hidden>{{ t("rec_audio_track") }}<br><select id="f-track"></select></label>
+    </div>
+    <div class="error" id="f-no-account" hidden>{{ t("sch_no_account") }}</div>
+
+    <div class="sch-grid">
+      <div><span class="sch-label">{{ t("sch_formats") }}</span><br>
+        <label class="inline"><input type="checkbox" id="f-mp4" checked> {{ t("rec_save_mp4") }}</label>
+        <label class="inline"><input type="checkbox" id="f-mp3"> {{ t("rec_save_mp3") }}</label>
+      </div>
+      <label>{{ t("sch_chunk") }}<br><select id="f-chunk"></select></label>
+      <label>{{ t("sch_folder") }}<br><select id="f-folder"></select></label>
+    </div>
+    <div class="error" id="f-no-folders" hidden>{{ t("sch_no_folders") }}</div>
+
+    <div class="choices sch-kind">
+      <label class="choice"><input type="radio" name="kind" value="once" checked>
+        <span><b>{{ t("sch_once") }}</b><small>{{ t("sch_once_hint") }}</small></span></label>
+      <label class="choice"><input type="radio" name="kind" value="daily">
+        <span><b>{{ t("sch_daily") }}</b><small>{{ t("sch_daily_hint") }}</small></span></label>
+    </div>
+
+    <div class="sch-grid" id="once-box">
+      <label>{{ t("sch_from") }}<br><input type="datetime-local" step="1" id="f-begin"></label>
+      <label>{{ t("sch_to") }}<br><input type="datetime-local" step="1" id="f-end"></label>
+      <div><span class="sch-label">&nbsp;</span><br><span class="presets">
+        <button type="button" id="f-yesterday">{{ t("sch_yesterday") }}</button></span></div>
+      <div><span class="sch-label">{{ t("sch_start") }}</span><br>
+        <label class="inline"><input type="radio" name="when" value="now" checked> {{ t("sch_start_now") }}</label>
+        <label class="inline"><input type="radio" name="when" value="at"> {{ t("sch_start_at") }}</label>
+        <input type="datetime-local" id="f-start" disabled>
+      </div>
+    </div>
+    <div class="sch-grid" id="daily-box" hidden>
+      <label>{{ t("sch_run_at") }}<br><input type="time" id="f-run-at" value="03:00"></label>
+    </div>
+
+    <p class="muted note" id="f-summary"></p>
+    <div class="error" id="f-error" hidden></div>
+    <div class="srv-form-actions">
+      <button type="submit" class="primary">{{ t("sch_create") }}</button>
+      <button type="button" class="link" id="f-cancel">{{ t("cancel") }}</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>{{ t("sch_jobs") }}</h2>
+  <div id="jobs"><p class="muted">{{ t("loading") }}</p></div>
+</section>
+
+{% if session.is_admin %}
+<section class="card">
+  <h2>{{ t("sch_folders") }}</h2>
+  <p class="muted">{{ t("sch_folders_hint") }}</p>
+  <div class="table-wrap">
+    <table class="grid"><thead><tr><th>{{ t("srv_name") }}</th><th>{{ t("sch_path") }}</th><th></th></tr></thead>
+      <tbody id="folder-rows"></tbody></table>
+  </div>
+  <form class="sch-grid sch-folder-form" id="folder-form" autocomplete="off">
+    <label>{{ t("srv_name") }}<br><input id="d-name" maxlength="100" required placeholder="{{ t('sch_folder_name_ph') }}"></label>
+    <label class="sch-path">{{ t("sch_path") }}<br><input id="d-path" maxlength="400" required placeholder="D:\Exports  /  \\server\share\exports"></label>
+    <div><span class="sch-label">&nbsp;</span><br><button type="submit" class="btn">+ {{ t("sch_folder_add") }}</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/schedule.js?v={{ static_version() }}"></script>
+{% endblock %}

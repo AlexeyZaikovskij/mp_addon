@@ -366,12 +366,16 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
         # that jumps first sets it, the others take the same shift when they jump, and their few packets that
         # would overlap the previous part are dropped.
         common = 0
+        aac = {a.index for a in audios if a.codec_context.name == "aac"}
+        rejected = 0
         shift: dict[int, int] = {}  # stream index -> ticks added to its timestamps
         last: dict[int, tuple[int, int]] = {}  # stream index -> (last dts after the shift, usual step)
         for packet in src.demux(*videos, *audios):
             if packet.dts is None or not packet.size:
                 continue
             idx = packet.stream.index
+            if idx in aac and not _adts(packet):
+                continue  # a cut-off AAC frame at the edge of the cut
             if idx in video_started and not video_started[idx]:
                 if not packet.is_keyframe:
                     continue
@@ -401,7 +405,18 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
                 packet.pts += shift[idx]
             packet.dts = dts
             packet.stream = mapping[idx]
-            dst.mux(packet)
+            try:
+                dst.mux(packet)
+            except av.error.InvalidDataError:
+                rejected += 1  # one damaged packet must not cost the whole file
+                if rejected > 100:
+                    raise
+
+
+def _adts(packet) -> bool:
+    """An AAC packet from TS starts with an ADTS header (sync word 0xFFF, 7 bytes at least)."""
+    head = bytes(packet)[:2]
+    return packet.size >= 7 and head[0] == 0xFF and head[1] & 0xF0 == 0xF0
 
 
 def _dts_lag(source: Path, pids: list[int] | None) -> dict[int, int]:

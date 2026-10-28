@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>{{ t("app_title") }}</title>
   <link rel="stylesheet" href="/static/style.css?v={{ static_version() }}">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">{{ t("app_title") }}</div>
+    <div class="brand"><b>MultiProbe</b> Toolkit</div>
     <div class="topbar-right">
       <nav class="lang">
         {% for code in ["en", "ru"] %}

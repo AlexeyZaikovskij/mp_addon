@@ -4,10 +4,12 @@
   const $ = (sel) => document.querySelector(sel);
 
   // Categorical palette, fixed order (validated for colour-vision deficiencies on adjacent pairs).
-  const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
-  const INK = "#1d2433";
-  const MUTED = "#6b7486";
-  const GRID = "#e7ebf1";
+  // Colours of the page theme (style.css); series colours bright enough for the dark background.
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const PALETTE = ["#50b3d0", "#f08a5d", "#3fc28a", "#f2b632", "#e889b4", "#7bd36b", "#9b8cf2", "#ff6b6b"];
+  const INK = css("--text");
+  const MUTED = css("--muted");
+  const GRID = css("--grid-line");
 
   async function getJson(url) {
     const resp = await fetch(url);
@@ -63,7 +65,7 @@
     return {
       useUTC: true,
       animation: false,
-      textStyle: { fontFamily: "Segoe UI, system-ui, sans-serif", color: INK },
+      textStyle: { fontFamily: "Roboto, Segoe UI, system-ui, sans-serif", color: INK },
       grid: { left: 64, right: 24, top: c.series.length > 1 ? 44 : 20, bottom: 64 },
       legend: c.series.length > 1
         ? { type: "scroll", top: 0, left: 0, icon: "roundRect", itemWidth: 14, itemHeight: 4, textStyle: { color: INK } }
@@ -71,7 +73,7 @@
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "line", lineStyle: { color: MUTED } },
-        backgroundColor: "#16202f", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 },
+        backgroundColor: css("--raised"), borderColor: css("--border"), borderWidth: 1, textStyle: { color: INK, fontSize: 12 },
         formatter: (params) => {
           const main = params.filter((p) => !String(p.seriesId).startsWith("band"));
           if (!main.length) return "";
@@ -103,7 +105,7 @@
       dataZoom: [
         { type: "inside", filterMode: "none" },
         { type: "slider", height: 18, bottom: 8, filterMode: "none", borderColor: GRID,
-          fillerColor: "rgba(42,120,214,.12)", handleStyle: { color: "#fff", borderColor: MUTED },
+          fillerColor: "rgba(80,179,208,.15)", handleStyle: { color: css("--field"), borderColor: MUTED },
           labelFormatter: (v) => fmtTime(v, false), textStyle: { color: MUTED } },
       ],
       series,

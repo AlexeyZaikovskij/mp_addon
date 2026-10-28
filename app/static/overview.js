@@ -5,11 +5,12 @@
   const REFRESH_MS = 30_000;
 
   // Status palette (fixed meaning, always shown with a label).
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const STATES = [
-    { key: "error", color: "#d03b3b", label: T.ov_state_error },
+    { key: "error", color: "#e54848", label: T.ov_state_error },
     { key: "warning", color: "#ec835a", label: T.ov_state_warning },
     { key: "caution", color: "#fab219", label: T.ov_state_caution },
-    { key: "ok", color: "#0ca30c", label: T.ov_state_ok },
+    { key: "ok", color: "#3fae5a", label: T.ov_state_ok },
   ];
   const stateInfo = Object.fromEntries(STATES.map((s) => [s.key, s]));
 
@@ -46,10 +47,10 @@
       animation: false,
       tooltip: { trigger: "item", formatter: (p) => `${escapeHtml(p.name)}: <b>${p.value}</b> (${p.percent}%)` },
       title: { text: String(total), subtext: T.ov_channels, left: "center", top: "39%",
-               textStyle: { fontSize: 26, fontWeight: 700, color: "#1d2433" }, subtextStyle: { color: "#6b7486" } },
+               textStyle: { fontSize: 26, fontWeight: 700, color: css("--text") }, subtextStyle: { color: css("--muted") } },
       series: [{
         type: "pie", radius: ["58%", "84%"], avoidLabelOverlap: true, label: { show: false },
-        itemStyle: { borderColor: "#fff", borderWidth: 2 }, data: data.filter((d) => d.value),
+        itemStyle: { borderColor: css("--card"), borderWidth: 2 }, data: data.filter((d) => d.value),
       }],
     }, true);
     $("#legend").innerHTML = STATES.map((s) => `

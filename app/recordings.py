@@ -342,9 +342,13 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
     video and audio (without them: the first video and audio). A source can restart its timestamps (a looped
     file, an encoder restart); MP4 needs them always growing, so after such a jump the time of that track simply
     continues. Some sources (seen on an HLS channel) give decoding times up to a few frames later than the
-    presentation times, which MP4 refuses: those decoding times are moved back by the largest such lag."""
+    presentation times, which MP4 refuses: those decoding times are moved back by the largest such lag.
+
+    TS timestamps run from the encoder's clock (hours, not 0): `make_zero` starts the MP4 at 0, otherwise
+    players put the piece at the end of an hours-long timeline."""
     lag = _dts_lag(source, pids)
-    with av.open(str(source), options=_PROBE) as src, av.open(str(out), "w", format="mp4", options={"movflags": "+faststart"}) as dst:
+    mp4_options = {"movflags": "+faststart", "avoid_negative_ts": "make_zero"}
+    with av.open(str(source), options=_PROBE) as src, av.open(str(out), "w", format="mp4", options=mp4_options) as dst:
         videos, audios = list(src.streams.video), list(src.streams.audio)
         if pids:
             videos, audios = [v for v in videos if v.id in pids], [a for a in audios if a.id in pids]

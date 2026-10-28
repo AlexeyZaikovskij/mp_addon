@@ -177,6 +177,7 @@
     btn.disabled = true;
     try {
       await stopPiece();
+      video.muted = true;  // every new piece starts silent; the user turns the sound on in the player
       $("#video-empty").hidden = true;
       $("#player-title").textContent = `${p.name} · ${p.begin.replace("T", " ")} – ${p.end.slice(11)}`;
       $("#player-status").textContent = fmt(T.rec_preparing, { done: 0, total: Math.round((toMs(p.end) - toMs(p.begin)) / 1000) });

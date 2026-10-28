@@ -53,6 +53,7 @@
       return `<option value="${i}">${escapeHtml(t.name)} — ${escapeHtml(where)}${t.disabled ? ` (${escapeHtml(T.rec_disabled)})` : ""}</option>`;
     }).join("");
     task = tasks[0];
+    loadServices();
     // Default piece: 5 minutes ending 2 minutes ago (the most recent minutes are not written yet).
     const end = toMs(nowStr) - 120_000;
     $("#day").value = fromMs(end).slice(0, 10);
@@ -60,7 +61,42 @@
     loadTimeline();
   }
 
-  $("#task").addEventListener("change", () => { task = tasks[Number($("#task").value)]; loadTimeline(); });
+  $("#task").addEventListener("change", () => { task = tasks[Number($("#task").value)]; loadTimeline(); loadServices(); });
+
+  // A recording of a whole stream holds every channel of it: the file is made for the channel picked here.
+  let services = [];
+  let svcSeq = 0;
+  async function loadServices() {
+    const seq = ++svcSeq;
+    services = [];
+    renderServices();
+    if (!task.object_id) return;
+    const q = new URLSearchParams({ server_id: task.server_id, node_id: task.node_id, object_id: task.object_id });
+    try {
+      const list = await api(`/api/rec/services?${q}`);
+      if (seq !== svcSeq) return;
+      services = list;
+    } catch { /* without the list the whole recording is saved, as before */ }
+    renderServices();
+  }
+
+  function renderServices() {
+    const multi = services.length > 1;
+    $("#service-wrap").hidden = !multi;
+    $("#service").innerHTML = services.map((s, i) =>
+      `<option value="${i}">${escapeHtml(s.name)}${s.service_id ? ` (${escapeHtml(T.rec_service_id)} ${escapeHtml(s.service_id)})` : ""}</option>`).join("");
+    $("#stream-note").hidden = !multi;
+    renderTracks();
+  }
+
+  const service = () => services[Number($("#service").value || 0)] || null;
+
+  function renderTracks() {
+    const audio = service()?.audio || [];
+    $("#track-wrap").hidden = audio.length < 2;
+    $("#track").innerHTML = audio.map((a) => `<option value="${a.pid}">${escapeHtml(a.name)}</option>`).join("");
+  }
+  $("#service").addEventListener("change", renderTracks);
 
   // --- Timeline -------------------------------------------------------------------------------------------
   let intervals = [];
@@ -149,7 +185,8 @@
       : toMs(end) - toMs(begin) > MAX_MIN * 60_000 ? fmt(T.rec_err_too_long, { n: MAX_MIN }) : "";
     $("#period-error").innerHTML = problem ? `<div class="error">${escapeHtml(problem)}</div>` : "";
     if (problem) return null;
-    return { server_id: task.server_id, task_id: task.task_id, name: task.name, begin, end };
+    const svc = services.length > 1 ? service() : null;
+    return { server_id: task.server_id, task_id: task.task_id, name: svc ? svc.name : task.name, begin, end };
   }
 
   // --- Player ---------------------------------------------------------------------------------------------
@@ -206,7 +243,6 @@
     }
     $("#player-status").textContent = st.ended ? fmt(T.rec_ready, { total: st.seconds })
       : fmt(T.rec_preparing, { done: st.seconds, total: st.total_seconds });
-    setTracks(st.tracks);
     if (st.playable && !attached) {
       attach(id);
       attached = true;
@@ -232,15 +268,6 @@
     }
   }
 
-  function setTracks(tracks) {
-    const many = tracks && tracks.length > 1;
-    $("#track-wrap").hidden = !many;
-    if (many && $("#track").options.length !== tracks.length) {
-      $("#track").innerHTML = tracks.map((t, i) =>
-        `<option value="${i}">${escapeHtml(t.language ? `${t.name} (${t.language})` : t.name)}</option>`).join("");
-    }
-  }
-
   window.addEventListener("pagehide", () => {
     if (piece) fetch(`/api/rec/play/${piece}`, { method: "DELETE", keepalive: true }).catch(() => {});
   });
@@ -259,7 +286,10 @@
     $("#exports").prepend(row);
     const state = row.querySelector(".rec-export-state"), fill = row.querySelector(".bar-fill");
     try {
-      const { id } = await api("/api/rec/export", { ...p, format, audio: Number($("#track").value || 0) });
+      const svc = service();
+      const audioPid = $("#track").value ? Number($("#track").value) : svc?.audio[0]?.pid ?? null;
+      const pids = svc ? [...svc.video, ...(format === "mp3" ? [] : svc.audio.map((a) => a.pid))] : null;
+      const { id } = await api("/api/rec/export", { ...p, format, pids: pids && pids.length ? pids : null, audio_pid: audioPid });
       for (;;) {
         const st = await api(`/api/rec/export/${id}`);
         fill.style.width = `${st.percent}%`;

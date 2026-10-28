@@ -11,6 +11,7 @@
 
   <div class="rec-pick" id="pick" hidden>
     <label>{{ t("rec_channel") }}<br><select id="task"></select></label>
+    <label id="service-wrap" hidden>{{ t("rec_service") }}<br><select id="service"></select></label>
     <label>{{ t("rec_day") }}<br>
       <span class="rec-day">
         <button type="button" class="btn small" id="day-prev" title="{{ t('rec_prev_day') }}">◀</button>
@@ -57,6 +58,7 @@
     </div>
     <p class="muted note" id="player-status"></p>
     <p class="muted note">{{ t("rec_preview_note") }}</p>
+    <p class="muted note" id="stream-note" hidden>{{ t("rec_stream_note") }}</p>
   </section>
 
   <section class="card">

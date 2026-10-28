@@ -109,8 +109,12 @@ Checked on MultiProbe 26.9 (one node, local storages).
   - `download`: the original TS (as recorded: Alaska 1920x1080 H.264 + AAC) is written to
     `<workingPath>\Exporter Files\<downloadTaskID>\<name>.ts`; `url` = `/export/<id>/<name>.ts`, served at
     **`http://<mp>:40000/fromAppManager/<nodeID>/export/<id>/<name>`** (URL-encode the name; this is what the
-    MultiProbe web UI uses). 1 min of Alaska took ~10 s. Deleting the task deletes the file but leaves the
-    empty folder. Two identical tasks at once work independently.
+    MultiProbe web UI uses). 1 min of Alaska took ~10 s. Deleting the task deletes the file a little later
+    (seen up to ~1 min) and leaves the empty folder. Two identical tasks at once work independently.
+  - A task on a whole stream (`objectKind: softwareStream`) records the whole multiplex (16 HD: ~30 Mbit/s,
+    3.4 GB per 15 min) and there is no PID filter in `DownloadTask`. The channel's PIDs come from
+    `MonitoringObject/Find`: `mpegService` children of the stream (`serviceID`), and their `mpegDecoder`
+    children named "<service>; PID: 257; Audio" (`typeName` "Video Decoder" / "Audio Decoder").
   - The cut starts in the middle of a GOP (Alaska: GOP ~11 s): open it with `analyzeduration`/`probesize`
     well above the GOP, otherwise the frame size stays 0x0 and an MP4 header cannot be written; drop video
     packets before the first key frame.
@@ -121,7 +125,9 @@ Checked on MultiProbe 26.9 (one node, local storages).
     audio-only TS segments of 1 s), `#EXT-X-PLAYLIST-TYPE:EVENT`; `#EXT-X-ENDLIST` appears once the whole piece
     is written (state `completed` can come earlier). Produced about real time or faster;
     `PROGRAM-DATE-TIME` is the wall clock at generation, not the recording time. `DownloadTask/Rewind` moves it.
-- On this test system a 60 s cut of Alaska holds ~49 s of media (1162 frames stamped 24 fps, the analyzer
-  shows 17 fps): the source itself delivers less than real time; the HLS preview hides it by re-timing.
+- On this test system the source loops a ~19 s clip: timestamps jump back (141.4 s -> 122.5 s) about every
+  25 s of wall time, so a cut holds ~77 % of its length in media (15 min -> 11:30). MP4 needs growing
+  timestamps: after a jump the Toolkit continues the time (one shift for all tracks, overlapping packets
+  dropped). The HLS preview hides it by re-timing.
 - The Toolkit makes MP4 by remuxing the `download` TS (no re-encoding) and MP3 by encoding its audio, both
   with PyAV (`av`, FFmpeg inside the wheel).

@@ -617,6 +617,13 @@ async def api_rec_timeline(server_id: int, task_id: str, day: str, session: sess
             "now": sec(now) if start <= now < end else None}
 
 
+@app.get("/api/rec/services")
+async def api_rec_services(server_id: int, node_id: int, object_id: str,
+                           session: sessions.Session = Depends(current_session)):
+    """Channels in a recording (one for a service, all of them for a whole stream) with their PIDs."""
+    return await recordings.services(session.conn(server_id), node_id, object_id)
+
+
 class RecPeriod(BaseModel):
     server_id: int
     task_id: str
@@ -671,7 +678,8 @@ async def api_rec_play_stop(piece_id: str, session: sessions.Session = Depends(c
 
 class RecExport(RecPeriod):
     format: Literal["mp4", "mp3"]
-    audio: int = 0  # audio track for MP3
+    pids: list[int] | None = None  # video and audio PIDs of the channel (a recording of a whole stream)
+    audio_pid: int | None = None  # audio track for MP3
 
 
 def _file_name(name: str, begin: datetime, end: datetime, tz: ZoneInfo, ext: str) -> str:
@@ -689,7 +697,7 @@ async def api_rec_export(req: RecExport, session: sessions.Session = Depends(cur
               "file_name": _file_name(req.name, begin, end, _user_tz(session), req.format)}
 
     async def work(job: jobs.Job):
-        return await recordings.export(job, conn, req.task_id, begin, end, req.format, req.audio)
+        return await recordings.export(job, conn, req.task_id, begin, end, req.format, req.pids, req.audio_pid)
 
     return {"id": jobs.start(session.user_id, params, work).id}
 

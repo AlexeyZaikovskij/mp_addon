@@ -41,6 +41,12 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "nav_recordings": {"en": "Recordings", "ru": "Записи"},
     "rec_channel": {"en": "Recorded channel", "ru": "Записываемый канал"},
+    "rec_service": {"en": "Channel in the stream", "ru": "Канал в потоке"},
+    "rec_service_id": {"en": "service", "ru": "сервис"},
+    "rec_stream_note": {
+        "en": "This recording holds the whole stream. The player shows MultiProbe's preview of the stream; MP4 and MP3 are saved for the channel picked above.",
+        "ru": "Эта запись содержит весь поток. Плеер показывает предпросмотр потока от MultiProbe; MP4 и MP3 сохраняются для канала, выбранного выше.",
+    },
     "rec_day": {"en": "Day", "ru": "День"},
     "rec_prev_day": {"en": "Previous day", "ru": "Предыдущий день"},
     "rec_next_day": {"en": "Next day", "ru": "Следующий день"},

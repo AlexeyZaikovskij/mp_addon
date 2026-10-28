@@ -40,6 +40,7 @@ async def tasks(conn: Conn) -> list[dict]:
         ({
             "server_id": conn.server_id, "server": conn.name, "task_id": t["taskID"],
             "name": t.get("monitoringObjectName") or t["taskID"], "kind": t.get("objectKind"),
+            "object_id": t.get("monitoringObjectID"),
             "node_id": t.get("nodeID"), "node": t.get("nodeName") or "", "disabled": bool(t.get("isDisabled")),
         } for t in items or []),
         key=lambda t: t["name"].lower(),
@@ -64,6 +65,44 @@ async def timeline(conn: Conn, task_id: str, begin: datetime, end: datetime) -> 
         out.append({"begin": max(b, begin), "end": min(e, end), "status": r.get("streamStatusType") or "",
                     "media": r.get("streamStatusType") in MEDIA_STATES, "storage": r.get("storageName") or ""})
     return sorted(out, key=lambda r: r["begin"])
+
+
+_PID = re.compile(r"PID:\s*(\d+)")
+
+
+async def services(conn: Conn, node_id: int, object_id: str) -> list[dict]:
+    """Channels in a recording and their PIDs. A task on a service gives that one service; a task on a
+    whole stream (multiplex) gives every service inside it. PIDs come from the decoder names MultiProbe
+    gives ("Alaska; PID: 257; Audio")."""
+    objs = await mp_client.monitoring_objects(conn, node_id)
+    children: dict[str, list[dict]] = {}
+    for o in objs:
+        children.setdefault(o.get("parentID") or "", []).append(o)
+    obj = next((o for o in objs if o["monitoringObjectID"] == object_id), None)
+    if obj is None:
+        return []
+    found = [obj] if obj.get("objectKind") == "mpegService" else [
+        o for o in children.get(object_id, []) if o.get("objectKind") == "mpegService"]
+    out = []
+    for svc in found:
+        video, audio = [], []
+        for d in children.get(svc["monitoringObjectID"], []):
+            name, kind = d.get("name") or "", (d.get("typeName") or "").lower()
+            m = _PID.search(name)
+            if d.get("objectKind") != "mpegDecoder" or not m:
+                continue
+            pid = int(m.group(1))
+            if "video" in kind or name.endswith("; Video"):
+                video.append(pid)
+            elif "audio" in kind or name.endswith("; Audio"):
+                audio.append({"pid": pid, "name": f"PID {pid}"})
+        out.append({"id": svc["monitoringObjectID"], "name": svc.get("name") or "",
+                    "service_id": svc.get("serviceID"), "video": sorted(set(video)),
+                    "audio": sorted({a["pid"]: a for a in audio}.values(), key=lambda a: a["pid"])})
+    try:
+        return sorted(out, key=lambda x: int(x["service_id"] or 0))
+    except ValueError:
+        return out
 
 
 # --- Pieces: a part of a recording as HLS -------------------------------------------------------------
@@ -229,7 +268,9 @@ def purge_exports() -> None:
 
 
 async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: datetime, fmt: str,
-                 audio_index: int) -> dict:
+                 pids: list[int] | None = None, audio_pid: int | None = None) -> dict:
+    """`pids`: video and audio PIDs of the channel to keep (None = everything of a one-service recording);
+    `audio_pid`: the audio track for MP3 (None = the first one)."""
     """Progress: 0–100 MultiProbe cuts the recording, 100–180 downloading, 180–200 converting."""
     job.total_steps = 200
     job.params["phase"] = "cutting"
@@ -278,9 +319,9 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
         out = export_path(job)
         try:
             if fmt == "mp3":
-                await run_in_threadpool(_encode_mp3, source, out, audio_index)
+                await run_in_threadpool(_encode_mp3, source, out, audio_pid)
             else:
-                await run_in_threadpool(_remux_mp4, source, out)
+                await run_in_threadpool(_remux_mp4, source, out, pids)
         except Exception:
             out.unlink(missing_ok=True)  # no half-written files
             raise
@@ -294,17 +335,34 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
     return {"size": out.stat().st_size}
 
 
-def _remux_mp4(source: Path, out: Path) -> None:
+def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
     """TS -> MP4 without re-encoding. Video starts at the first key frame (a cut usually starts in the
-    middle of a GOP, and frames before the first key frame cannot be shown); audio is kept whole."""
+    middle of a GOP, and frames before the first key frame cannot be shown); audio is kept whole.
+
+    A recording of a whole multiplex (a "stream" task) holds every service: `pids` picks the channel's
+    video and audio (without them: the first video and audio). A source can restart its timestamps (a looped file, an encoder restart);
+    MP4 needs them always growing, so after such a jump the time of that track simply continues."""
     with av.open(str(source), options=_PROBE) as src, av.open(str(out), "w", format="mp4", options={"movflags": "+faststart"}) as dst:
-        if any(s.codec_context.width == 0 for s in src.streams.video):
+        videos, audios = list(src.streams.video), list(src.streams.audio)
+        if pids:
+            videos, audios = [v for v in videos if v.id in pids], [a for a in audios if a.id in pids]
+            if not videos and not audios:
+                raise RuntimeError("The selected channel is not in the recording")
+        elif len(videos) > 1:
+            videos, audios = videos[:1], audios[:1]
+        if any(s.codec_context.width == 0 for s in videos):
             raise RuntimeError("No key frame in the piece: make it longer")
-        mapping = {s.index: dst.add_stream_from_template(s) for s in src.streams if s.type in ("video", "audio")}
+        mapping = {s.index: dst.add_stream_from_template(s) for s in videos + audios}
         if not mapping:
             raise RuntimeError("No audio or video in the recording")
-        video_started = {s.index: False for s in src.streams if s.type == "video"}
-        for packet in src.demux(*[s for s in src.streams if s.index in mapping]):
+        video_started = {s.index: False for s in videos}
+        # Timestamps in TS are 90 kHz for every track, so one shift keeps audio and video together: the track
+        # that jumps first sets it, the others take the same shift when they jump, and their few packets that
+        # would overlap the previous part are dropped.
+        common = 0
+        shift: dict[int, int] = {}  # stream index -> ticks added to its timestamps
+        last: dict[int, tuple[int, int]] = {}  # stream index -> (last dts after the shift, usual step)
+        for packet in src.demux(*videos, *audios):
             if packet.dts is None or not packet.size:
                 continue
             idx = packet.stream.index
@@ -312,15 +370,43 @@ def _remux_mp4(source: Path, out: Path) -> None:
                 if not packet.is_keyframe:
                     continue
                 video_started[idx] = True
+            dts = packet.dts + shift.get(idx, 0)
+            if idx in last:
+                prev, step = last[idx]
+                second = round(1 / packet.time_base)
+                if prev - second < dts <= prev and shift.get(idx, 0) == common:
+                    continue  # still overlapping the end of the previous part
+                if dts <= prev or dts - prev > 10 * second:  # restart (or a jump over 10 s)
+                    own = prev + step - packet.dts  # the shift this track alone would need
+                    if common > shift.get(idx, 0) and packet.dts + common > prev - second:
+                        shift[idx] = common  # follow the track that jumped first
+                    else:
+                        shift[idx] = common = own
+                    dts = packet.dts + shift[idx]
+                    if dts <= prev:
+                        continue  # overlaps the end of the previous part
+                else:
+                    step = dts - prev
+                last[idx] = (dts, step)
+            else:
+                last[idx] = (dts, packet.duration or 1)
+            delta = dts - packet.dts
+            if delta:
+                packet.pts = packet.pts + delta if packet.pts is not None else None
+                packet.dts = dts
             packet.stream = mapping[idx]
             dst.mux(packet)
 
 
-def _encode_mp3(source: Path, out: Path, audio_index: int) -> None:
+def _encode_mp3(source: Path, out: Path, audio_pid: int | None = None) -> None:
     with av.open(str(source), options=_PROBE) as src, av.open(str(out), "w", format="mp3") as dst:
         if not src.streams.audio:
             raise RuntimeError("No audio in the recording")
-        s = src.streams.audio[min(max(audio_index, 0), len(src.streams.audio) - 1)]
+        s = src.streams.audio[0]
+        if audio_pid is not None:
+            s = next((a for a in src.streams.audio if a.id == audio_pid), None)
+            if s is None:
+                raise RuntimeError(f"Audio PID {audio_pid} is not in the recording")
         layout = "mono" if s.codec_context.layout.nb_channels == 1 else "stereo"
         o = dst.add_stream("libmp3lame", rate=s.codec_context.sample_rate or 48000, layout=layout)
         o.bit_rate = 192_000

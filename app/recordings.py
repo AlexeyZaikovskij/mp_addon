@@ -284,7 +284,7 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
     purge_exports()
     source = EXPORT_DIR / f"{job.id}.src.ts"
     try:
-        last, last_change, completed = None, time.monotonic(), None
+        last, last_change = None, time.monotonic()
         while True:
             await asyncio.sleep(2)
             found = await mp_client.call(conn, "POST", "/api/Recording/DownloadTask/Find", {"taskID": task_id})
@@ -294,26 +294,25 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
             if task is None or state in ("failed", "stopped"):
                 raise RuntimeError(f"MultiProbe: {state or 'task removed'} {log.get('message') or ''}".strip())
             if state == "completed":
-                if task.get("url"):
-                    break
-                # Seen once: "completed" came before the link to the file. Give it a little time.
-                completed = completed or time.monotonic()
-                if time.monotonic() - completed > 30:
-                    raise RuntimeError("MultiProbe did not publish the file")
-                continue
+                break
             if percent != last:
                 last, last_change = percent, time.monotonic()
             elif time.monotonic() - last_change > STALL_TIMEOUT:
                 raise RuntimeError("MultiProbe stopped cutting the recording")
             job.done_steps = min(99, round(percent))
 
+        # With two exports running, MultiProbe completes one of them without `url` (the file is there). The
+        # link always has this form, so it is built when missing.
+        file_name = task.get("fileName") or dt.get("fileName")
+        url = task.get("url") or (f"/export/{dt_id}/{file_name}" if file_name else None)
+        if not url:
+            raise RuntimeError("MultiProbe did not publish the file")
         job.params["phase"] = "downloading"
 
         def progress(done: int, total: int) -> None:
             job.done_steps = 100 + (round(80 * done / total) if total else 40)
 
-        await mp_client.download(conn, f"/fromAppManager/{task['nodeID']}/{quote(task['url'].lstrip('/'))}",
-                                 source, progress)
+        await mp_client.download(conn, f"/fromAppManager/{task['nodeID']}/{quote(url.lstrip('/'))}", source, progress)
         job.params["phase"] = "converting"
         job.done_steps = 180
         out = export_path(job)

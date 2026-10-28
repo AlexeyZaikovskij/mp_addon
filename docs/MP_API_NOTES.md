@@ -110,7 +110,9 @@ Checked on MultiProbe 26.9 (one node, local storages).
     `<workingPath>\Exporter Files\<downloadTaskID>\<name>.ts`; `url` = `/export/<id>/<name>.ts`, served at
     **`http://<mp>:40000/fromAppManager/<nodeID>/export/<id>/<name>`** (URL-encode the name; this is what the
     MultiProbe web UI uses). 1 min of Alaska took ~10 s. Deleting the task deletes the file a little later
-    (seen up to ~1 min) and leaves the empty folder. Two identical tasks at once work independently.
+    (seen up to ~1 min) and leaves the empty folder. With two tasks at once MultiProbe works them one
+    after the other and may complete one **without `url`** (it never appears, `filePath` is set); the link
+    `/export/<downloadTaskID>/<fileName>` works for it anyway.
   - A task on a whole stream (`objectKind: softwareStream`) records the whole multiplex (16 HD: ~30 Mbit/s,
     3.4 GB per 15 min) and there is no PID filter in `DownloadTask`. The channel's PIDs come from
     `MonitoringObject/Find`: `mpegService` children of the stream (`serviceID`), and their `mpegDecoder`

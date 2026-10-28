@@ -11,6 +11,9 @@ stored, connections last for the session). The server in `MP_API_URL` is put int
 
 ## Run (development)
 
+On Windows just double-click `run.bat` (or `run.bat --dev`): it creates `.venv` and `config.env` on the
+first start, brings dependencies up to date (handy after `git pull`) and starts the Toolkit. By hand:
+
 ```bash
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt

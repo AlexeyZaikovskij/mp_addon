@@ -5,3 +5,4 @@ jinja2==3.1.6
 python-multipart==0.0.20
 tzdata==2025.2
 reportlab==4.2.5
+av==19.0.2

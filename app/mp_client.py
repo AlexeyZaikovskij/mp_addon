@@ -99,6 +99,34 @@ async def call(conn: Conn, method: str, path: str, body: Any = None) -> Any:
     return resp.json() if resp.content else None
 
 
+async def get_file(conn: Conn, path: str) -> httpx.Response:
+    """A file MultiProbe publishes outside the API (HLS of a recording). The caller checks the status:
+    404 is normal while MultiProbe has not written the file yet."""
+    try:
+        return await client(conn.url, conn.verify_tls).get(path, headers={"Cookie": f"{TOKEN_COOKIE}={conn.token}"})
+    except httpx.HTTPError as exc:
+        raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+
+
+async def download(conn: Conn, path: str, dest, progress=None) -> None:
+    """Save a (possibly large) file MultiProbe publishes to `dest`; `progress(bytes_done, bytes_total)`."""
+    try:
+        async with client(conn.url, conn.verify_tls).stream(
+            "GET", path, headers={"Cookie": f"{TOKEN_COOKIE}={conn.token}"}, timeout=httpx.Timeout(120, read=600)
+        ) as resp:
+            if resp.status_code != 200:
+                raise MPError(f"http{resp.status_code}", f"{conn.name}: {path}", resp.status_code, conn.server_id)
+            total, done = int(resp.headers.get("content-length") or 0), 0
+            with open(dest, "wb") as f:
+                async for chunk in resp.aiter_bytes(1 << 20):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done, total)
+    except httpx.HTTPError as exc:
+        raise MPError("unreachable", f"{conn.name}: {exc}", 0, conn.server_id) from exc
+
+
 # --- Dictionaries -----------------------------------------------------------
 
 async def nodes(conn: Conn) -> list[dict]:

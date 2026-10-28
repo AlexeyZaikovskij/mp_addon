@@ -1,7 +1,8 @@
 # MultiProbe Toolkit (mp_addon)
 
 A web toolkit for MultiProbe: a live overview of all channels, reports (alarm history, measurements,
-SCTE-35 markers) with CSV/XML/PDF export and templates, across one or several independent MultiProbe servers.
+SCTE-35 markers) with CSV/XML/PDF export and templates, playback of MultiRec recordings with MP4/MP3 export,
+across one or several independent MultiProbe servers.
 
 Users sign in with **Toolkit accounts**. The first start opens "Create the administrator" (only in a browser
 on the computer running the Toolkit). Administrators manage Toolkit users and the list of MultiProbe
@@ -30,12 +31,13 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/mp_client.py` | MultiProbe API client |
 | `app/storage.py` | Report templates (SQLite in `data/addon.db`, set `DATA_DIR` to move it) |
 | `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
+| `app/recordings.py` | Recordings: timeline, HLS preview through the Toolkit, MP4/MP3 export (PyAV) |
 | `app/auth.py` | Toolkit passwords (scrypt) and the lock-out after failed sign-ins |
 | `app/sessions.py` | Server-side sessions (the MP token never reaches the browser) |
 | `app/i18n.py` | EN/RU strings |
 | `app/templates/`, `app/static/` | Pages, styles, wizard script (no CDN — works offline) |
 | `app/fonts/` | DejaVu Sans for PDF (free licence alongside) |
-| `app/static/vendor/` | ECharts 5.5.1 (Apache 2.0, licence alongside) — bundled, no CDN |
+| `app/static/vendor/` | ECharts 5.5.1 and hls.js 1.5.20 (Apache 2.0, licences alongside) — bundled, no CDN |
 | `docs/MP_API_NOTES.md` | What we learned about the MultiProbe API |
 | `docs/swagger.json` | MultiProbe API spec (v26.6) |
 
@@ -51,4 +53,6 @@ when a file under `app/` changes, and listens on localhost only.
 4b. ✅ MultiProbe Toolkit: overview page (channel states now, most problematic channels, one click to a report)
 4c. ✅ Several independent MultiProbe servers: shared server list, per-user sign-in, reports and overview across servers
 4d. ✅ Toolkit's own users and roles (administrator / user), first-run setup, account page
+4e. ✅ Recordings: recorded channels and their timeline, playback of a piece (preview), MP4 in the original
+   quality (no re-encoding) and MP3 (audio only)
 5. Windows service + offline installer

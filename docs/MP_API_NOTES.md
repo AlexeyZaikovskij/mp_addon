@@ -90,3 +90,38 @@ spec: `/swagger/v2/swagger.json`).
   `uniqueProgramId`, `availNum`; plus `spliceDescriptorTypes`, `sapType`, `ptsAdjustment`.
 - The decoder writes one empty row (all values null) when it starts — skip it.
 - Markers are stored with a delay of up to a couple of minutes, and not always on every profile.
+
+## Recordings (MultiRec)
+
+Checked on MultiProbe 26.9 (one node, local storages).
+
+- `Recording/Task/Find {}` — recording tasks: `taskID`, `monitoringObjectID` / `monitoringObjectName` (a service
+  such as "Alaska", or a whole stream), `objectKind`, `nodeID`, `isDisabled`.
+- `Recording/Storage/Find {}` — storages (`name`, `workingPath`). Segments lie on disk as
+  `<workingPath>\<TASKID>\<guid>.ts`.
+- `Recording/TimeLine/Find {taskID, timeBegin, timeEnd}` — intervals with `streamStatusType` (`data`, `signalloss`,
+  `nowriting`, `notinit` …); the current interval has no `timeEnd`. Only `data` / `datawithAD` /
+  `reservesourcedata` contain media.
+- `Recording/DownloadTask/Add` cuts a piece `startDate`–`endDate` of one task. **`transcodingConfiguration` with
+  `encoder`, `decoder`, `render` objects (empty is fine) is required** even for plain `download` / `stream`,
+  otherwise 500 "Object reference not set…". Progress in `DownloadTask/Find` →
+  `downloadTaskStateLog.downloadTaskState` / `downloadPercent`. Delete with `DownloadTask/Delete/{id}`.
+  - `download`: the original TS (as recorded: Alaska 1920x1080 H.264 + AAC) is written to
+    `<workingPath>\Exporter Files\<downloadTaskID>\<name>.ts`; `url` = `/export/<id>/<name>.ts`, served at
+    **`http://<mp>:40000/fromAppManager/<nodeID>/export/<id>/<name>`** (URL-encode the name; this is what the
+    MultiProbe web UI uses). 1 min of Alaska took ~10 s. Deleting the task deletes the file but leaves the
+    empty folder. Two identical tasks at once work independently.
+  - The cut starts in the middle of a GOP (Alaska: GOP ~11 s): open it with `analyzeduration`/`probesize`
+    well above the GOP, otherwise the frame size stays 0x0 and an MP4 header cannot be written; drop video
+    packets before the first key frame.
+  - `stream` + `downloadTaskStreamOutputType: hls` is a **preview**: MultiProbe re-encodes it to 640x360
+    whatever `encoder` settings are passed (also with `streamWithTranscoding`). `url` =
+    `Streams/<id>/playlist.m3u8`, served at **`http://<mp>:40000/fromNode/<nodeID>/Streams/<id>/playlist.m3u8`**
+    (no auth needed). Master playlist with one video variant and a separate audio rendition (video-only and
+    audio-only TS segments of 1 s), `#EXT-X-PLAYLIST-TYPE:EVENT`; `#EXT-X-ENDLIST` appears once the whole piece
+    is written (state `completed` can come earlier). Produced about real time or faster;
+    `PROGRAM-DATE-TIME` is the wall clock at generation, not the recording time. `DownloadTask/Rewind` moves it.
+- On this test system a 60 s cut of Alaska holds ~49 s of media (1162 frames stamped 24 fps, the analyzer
+  shows 17 fps): the source itself delivers less than real time; the HLS preview hides it by re-timing.
+- The Toolkit makes MP4 by remuxing the `download` TS (no re-encoding) and MP3 by encoding its audio, both
+  with PyAV (`av`, FFmpeg inside the wheel).

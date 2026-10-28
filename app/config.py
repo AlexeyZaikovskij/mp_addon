@@ -33,6 +33,7 @@ class Settings:
     degraded_min_priority: int
     data_dir: Path
     pdf_max_rows: int
+    rec_max_minutes: int
 
 
 def load_settings() -> Settings:
@@ -52,6 +53,7 @@ def load_settings() -> Settings:
         outage_min_priority=int(get("OUTAGE_MIN_PRIORITY", "400")),
         degraded_min_priority=int(get("DEGRADED_MIN_PRIORITY", "200")),
         pdf_max_rows=int(get("PDF_MAX_ROWS", "2000")),
+        rec_max_minutes=int(get("REC_MAX_MINUTES", "120")),
         data_dir=Path(get("DATA_DIR", str(ROOT / "data"))),
         csv_delimiter={"tab": "\t", "comma": ","}.get(get("CSV_DELIMITER", ";"), get("CSV_DELIMITER", ";")),
     )

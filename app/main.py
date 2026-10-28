@@ -10,12 +10,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, i18n, jobs, mp_client, overview, sessions, storage
+from . import auth, i18n, jobs, mp_client, overview, recordings, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -27,6 +27,7 @@ from .reports import export, pdf, timeline
 async def lifespan(_: FastAPI):
     storage.init()
     yield
+    await recordings.close()
     await mp_client.close()
 
 
@@ -573,6 +574,141 @@ async def api_overview_top(hours: int = 24, session: sessions.Session = Depends(
 async def templates_page(request: Request, session: sessions.Session = Depends(current_session)):
     lang = i18n.pick_lang(request)
     return render(request, "templates.html", session=session, strings=i18n.bundle(lang))
+
+
+# --- Recordings ---------------------------------------------------------------
+
+@app.get("/recordings", response_class=HTMLResponse)
+async def recordings_page(request: Request, session: sessions.Session = Depends(current_session)):
+    lang = i18n.pick_lang(request)
+    return render(request, "recordings.html", session=session, strings=i18n.bundle(lang),
+                  max_minutes=settings.rec_max_minutes)
+
+
+@app.get("/api/rec/tasks")
+async def api_rec_tasks(session: sessions.Session = Depends(current_session)):
+    """Recording tasks of the server picked in the header (or of all connected servers)."""
+    conns = session.scoped()
+    results = await asyncio.gather(*(recordings.tasks(c) for c in conns), return_exceptions=True)
+    out, errors = [], []
+    for c, res in zip(conns, results):
+        if isinstance(res, Exception):
+            errors.append({"server_id": c.server_id, "server": c.name, "message": str(res)})
+        else:
+            out += res
+    return {"tasks": out, "errors": errors, "multi_server": len(conns) > 1, "connected": bool(session.conns),
+            "now": datetime.now(_user_tz(session)).strftime("%Y-%m-%dT%H:%M:%S")}
+
+
+@app.get("/api/rec/timeline")
+async def api_rec_timeline(server_id: int, task_id: str, day: str, session: sessions.Session = Depends(current_session)):
+    """Recording intervals of one day (the user's time zone), as seconds from midnight."""
+    tz = _user_tz(session)
+    try:
+        start = _to_utc(datetime.strptime(day, "%Y-%m-%d"), tz)
+    except ValueError:
+        raise HTTPException(422, "day must be YYYY-MM-DD")
+    end = start + timedelta(days=1)
+    rows = await recordings.timeline(session.conn(server_id), task_id, start, end)
+    sec = lambda v: round((v - start).total_seconds())
+    now = datetime.now(timezone.utc)
+    return {"intervals": [{"from": sec(r["begin"]), "to": sec(r["end"]), "status": r["status"], "media": r["media"],
+                           "storage": r["storage"]} for r in rows],
+            "now": sec(now) if start <= now < end else None}
+
+
+class RecPeriod(BaseModel):
+    server_id: int
+    task_id: str
+    name: str = ""
+    begin: datetime  # naive, in the user's time zone
+    end: datetime
+
+
+def _rec_period(req: RecPeriod, session: sessions.Session) -> tuple[datetime, datetime]:
+    tz = _user_tz(session)
+    begin, end = _to_utc(req.begin, tz), _to_utc(req.end, tz)
+    t = i18n.translator("en")
+    if end <= begin:
+        raise HTTPException(422, t("err_period"))
+    if end - begin > timedelta(minutes=settings.rec_max_minutes):
+        raise HTTPException(422, t("rec_err_too_long", n=settings.rec_max_minutes))
+    if begin >= datetime.now(timezone.utc):
+        raise HTTPException(422, t("rec_err_future"))
+    return begin, end
+
+
+@app.post("/api/rec/play")
+async def api_rec_play(req: RecPeriod, session: sessions.Session = Depends(current_session)):
+    begin, end = _rec_period(req, session)
+    piece = await recordings.create(session.user_id, session.conn(req.server_id), req.task_id, req.name, begin, end)
+    return {"id": piece.id}
+
+
+def _piece(piece_id: str, session: sessions.Session) -> recordings.Piece:
+    piece = recordings.get(piece_id, session.user_id)
+    if piece is None:
+        raise HTTPException(404, "Playback not found or expired")
+    return piece
+
+
+@app.get("/api/rec/play/{piece_id}")
+async def api_rec_play_status(piece_id: str, session: sessions.Session = Depends(current_session)):
+    return await recordings.status(_piece(piece_id, session))
+
+
+@app.get("/api/rec/hls/{piece_id}/{name}")
+async def api_rec_hls(piece_id: str, name: str, session: sessions.Session = Depends(current_session)):
+    status, body, kind = await recordings.fetch(_piece(piece_id, session), name)
+    return Response(body, status_code=status, media_type=kind, headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/api/rec/play/{piece_id}")
+async def api_rec_play_stop(piece_id: str, session: sessions.Session = Depends(current_session)):
+    await recordings.drop(_piece(piece_id, session))
+    return {"ok": True}
+
+
+class RecExport(RecPeriod):
+    format: Literal["mp4", "mp3"]
+    audio: int = 0  # audio track for MP3
+
+
+def _file_name(name: str, begin: datetime, end: datetime, tz: ZoneInfo, ext: str) -> str:
+    b, e = begin.astimezone(tz), end.astimezone(tz)
+    span = f"{b:%Y-%m-%d %H-%M-%S} - " + (f"{e:%H-%M-%S}" if b.date() == e.date() else f"{e:%Y-%m-%d %H-%M-%S}")
+    clean = "".join(ch for ch in name if ch not in '\/:*?"<>|').strip() or "recording"
+    return f"{clean} {span}.{ext}"
+
+
+@app.post("/api/rec/export")
+async def api_rec_export(req: RecExport, session: sessions.Session = Depends(current_session)):
+    begin, end = _rec_period(req, session)
+    conn = session.conn(req.server_id)
+    params = {"format": req.format, "phase": "cutting",
+              "file_name": _file_name(req.name, begin, end, _user_tz(session), req.format)}
+
+    async def work(job: jobs.Job):
+        return await recordings.export(job, conn, req.task_id, begin, end, req.format, req.audio)
+
+    return {"id": jobs.start(session.user_id, params, work).id}
+
+
+@app.get("/api/rec/export/{job_id}")
+async def api_rec_export_status(job_id: str, session: sessions.Session = Depends(current_session)):
+    job = _job(job_id, session)
+    return {**job.progress(), "phase": job.params.get("phase"), "file_name": job.params.get("file_name"),
+            "size": (job.result or {}).get("size")}
+
+
+@app.get("/rec/export/{job_id}/file")
+async def rec_export_file(job_id: str, session: sessions.Session = Depends(current_session)):
+    job = _job(job_id, session)
+    path = recordings.export_path(job)
+    if job.state != "done" or not path.exists():
+        raise HTTPException(404, "File not found or expired")
+    media = "video/mp4" if job.params["format"] == "mp4" else "audio/mpeg"
+    return FileResponse(path, media_type=media, filename=job.params["file_name"])
 
 
 def _job(job_id: str, session: sessions.Session) -> jobs.Job:

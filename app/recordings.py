@@ -340,8 +340,11 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
     middle of a GOP, and frames before the first key frame cannot be shown); audio is kept whole.
 
     A recording of a whole multiplex (a "stream" task) holds every service: `pids` picks the channel's
-    video and audio (without them: the first video and audio). A source can restart its timestamps (a looped file, an encoder restart);
-    MP4 needs them always growing, so after such a jump the time of that track simply continues."""
+    video and audio (without them: the first video and audio). A source can restart its timestamps (a looped
+    file, an encoder restart); MP4 needs them always growing, so after such a jump the time of that track simply
+    continues. Some sources (seen on an HLS channel) give decoding times up to a few frames later than the
+    presentation times, which MP4 refuses: those decoding times are moved back by the largest such lag."""
+    lag = _dts_lag(source, pids)
     with av.open(str(source), options=_PROBE) as src, av.open(str(out), "w", format="mp4", options={"movflags": "+faststart"}) as dst:
         videos, audios = list(src.streams.video), list(src.streams.audio)
         if pids:
@@ -370,19 +373,20 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
                 if not packet.is_keyframe:
                     continue
                 video_started[idx] = True
-            dts = packet.dts + shift.get(idx, 0)
+            raw = packet.dts - lag.get(packet.stream.id, 0)
+            dts = raw + shift.get(idx, 0)
             if idx in last:
                 prev, step = last[idx]
                 second = round(1 / packet.time_base)
                 if prev - second < dts <= prev and shift.get(idx, 0) == common:
                     continue  # still overlapping the end of the previous part
                 if dts <= prev or dts - prev > 10 * second:  # restart (or a jump over 10 s)
-                    own = prev + step - packet.dts  # the shift this track alone would need
-                    if common > shift.get(idx, 0) and packet.dts + common > prev - second:
+                    own = prev + step - raw  # the shift this track alone would need
+                    if common > shift.get(idx, 0) and raw + common > prev - second:
                         shift[idx] = common  # follow the track that jumped first
                     else:
                         shift[idx] = common = own
-                    dts = packet.dts + shift[idx]
+                    dts = raw + shift[idx]
                     if dts <= prev:
                         continue  # overlaps the end of the previous part
                 else:
@@ -390,12 +394,22 @@ def _remux_mp4(source: Path, out: Path, pids: list[int] | None = None) -> None:
                 last[idx] = (dts, step)
             else:
                 last[idx] = (dts, packet.duration or 1)
-            delta = dts - packet.dts
-            if delta:
-                packet.pts = packet.pts + delta if packet.pts is not None else None
-                packet.dts = dts
+            if shift.get(idx) and packet.pts is not None:
+                packet.pts += shift[idx]
+            packet.dts = dts
             packet.stream = mapping[idx]
             dst.mux(packet)
+
+
+def _dts_lag(source: Path, pids: list[int] | None) -> dict[int, int]:
+    """PID -> how much later than its presentation time a packet's decoding time can be (0 when never)."""
+    lag: dict[int, int] = {}
+    with av.open(str(source), options=_PROBE) as src:
+        streams = [s for s in src.streams if s.type in ("video", "audio") and (not pids or s.id in pids)]
+        for p in src.demux(*streams):
+            if p.dts is not None and p.pts is not None and p.dts > p.pts:
+                lag[p.stream.id] = max(lag.get(p.stream.id, 0), p.dts - p.pts)
+    return lag
 
 
 def _encode_mp3(source: Path, out: Path, audio_pid: int | None = None) -> None:

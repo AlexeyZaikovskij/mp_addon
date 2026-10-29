@@ -12,7 +12,9 @@ stored, connections last for the session). The server in `MP_API_URL` is put int
 ## Run (development)
 
 On Windows just double-click `run.bat` (or `run.bat --dev`): it creates `.venv` and `config.env` on the
-first start, brings dependencies up to date (handy after `git pull`) and starts the Toolkit. By hand:
+first start, brings dependencies up to date (handy after `git pull`) and starts the Toolkit. It asks for administrator
+rights (UAC): the Services page needs them to control every MultiProbe service on this computer and change start
+types; `run.bat --no-admin` starts without them. By hand:
 
 ```bash
 python -m venv .venv

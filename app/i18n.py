@@ -199,8 +199,8 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "svc_this_pc": {"en": "this computer", "ru": "этот компьютер"},
     "svc_no_admin": {
-        "en": "The Toolkit runs without administrator rights: the server services and the start types can only be viewed here. Node services are still controlled through Guard.",
-        "ru": "Toolkit запущен без прав администратора: серверные службы и тип запуска здесь можно только смотреть. Службами узла по-прежнему управляет Guard.",
+        "en": "The Toolkit runs without administrator rights: the server services and the start types can only be viewed here (node services are still controlled through Guard). To control everything, restart the Toolkit with run.bat and allow administrator rights when Windows asks.",
+        "ru": "Toolkit запущен без прав администратора: серверные службы и тип запуска здесь можно только смотреть (службами узла по-прежнему управляет Guard). Чтобы управлять всем, перезапустите Toolkit через run.bat и разрешите права администратора, когда Windows спросит.",
     },
     "svc_remote": {
         "en": "A remote server: MultiProbe Guard shows and controls the node services only; the start type cannot be changed remotely.",

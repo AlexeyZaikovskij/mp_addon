@@ -133,12 +133,48 @@ async def _wait_state(name: str, state: str, seconds: int = 60) -> None:
     raise ServiceError(f"{name}: did not reach {state} in {seconds} s")
 
 
+START_WATCH = 6  # seconds a started service is watched: one that cannot start falls over within them
+
+
+def _exit_reason(out: str) -> str:
+    """From "sc query": the exit code a stopped service left, with Windows' text for it."""
+    codes = {}
+    for line in out.splitlines():
+        key, _, value = line.partition(":")
+        if key.strip() in ("WIN32_EXIT_CODE", "SERVICE_EXIT_CODE"):
+            codes[key.strip()] = int((value.split() or ["0"])[0])
+    code = codes.get("WIN32_EXIT_CODE") or codes.get("SERVICE_EXIT_CODE") or 0
+    if not code:
+        return "stopped right after the start"
+    try:
+        text = ctypes.FormatError(code).strip()
+    except (AttributeError, OSError):
+        text = ""
+    return f"stopped right after the start, exit code {code}" + (f" ({text})" if text else "")
+
+
+async def _watch_start(name: str) -> None:
+    """Windows reports a start as done before the service is up: wait until it runs, then make sure it stays."""
+    running_since = None
+    for _ in range(60):
+        _, out = await _run("sc.exe", "query", name)
+        if "STOPPED" in out:
+            raise ServiceError(_exit_reason(out) + "; see the service's log")
+        if "RUNNING" in out:
+            running_since = running_since or asyncio.get_running_loop().time()
+            if asyncio.get_running_loop().time() - running_since >= START_WATCH:
+                return
+        await asyncio.sleep(1)
+    raise ServiceError("did not start in 60 s")
+
+
 async def windows_action(name: str, action: str) -> None:
     if action in ("stop", "restart"):
         await _sc("stop", name)
         await _wait_state(name, "STOPPED")
     if action in ("start", "restart"):
         await _sc("start", name)
+        await _watch_start(name)
 
 
 async def set_start_type(name: str, start_type: str) -> None:
@@ -265,6 +301,25 @@ async def server_services(conn, tz) -> dict[str, Any]:
             "api_error": api_error, "nodes": out_nodes}
 
 
+async def _guard_watch_start(conn, node_id: int, software_ids: list[str], rows: dict[str, dict]) -> list[str]:
+    """Like _watch_start, through Guard: the services must be running and still be after START_WATCH seconds."""
+    names = {r["software_id"]: r["display"] for r in rows.values() if r.get("software_id")}
+    loop = asyncio.get_running_loop()
+    begin = loop.time()
+    status = {}
+    while loop.time() - begin < 30:
+        await asyncio.sleep(2)
+        status = await guard_status(conn, node_id, [{"softwareID": i} for i in software_ids])
+        states = {i: (status.get(i) or {}).get("status") for i in software_ids}
+        settled = loop.time() - begin >= START_WATCH
+        if settled and all(s == "running" for s in states.values()):
+            return []
+        if settled and not any(s in ("startPending", "stopPending") for s in states.values()):
+            break
+    return [f"{names.get(i, i)}: {(status.get(i) or {}).get('status') or 'unknown'} after the start; see the service's log"
+            for i in software_ids if (status.get(i) or {}).get("status") != "running"]
+
+
 # MultiProbe comes up in this order (the rest after them) and goes down in the reverse one.
 START_ORDER = ("Database Agent", "Backend", "Frontend", "Guard", "App Manager")
 
@@ -299,6 +354,8 @@ async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str
         if guard_ids:
             try:
                 await guard_action(conn, node_id, guard_ids, action)
+                if action != "stop":
+                    failed.extend(await _guard_watch_start(conn, node_id, guard_ids, rows))
             except (ServiceError, mp_client.MPError) as exc:
                 failed.append(f"Guard: {getattr(exc, 'message', '') or exc}")
 

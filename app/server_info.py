@@ -80,7 +80,8 @@ def _node(node: dict, content: dict, chart: list, device_names: dict, encoders: 
         "description": node.get("description") or "",
         "ip": content.get("mainIPAddress") or "",
         "cpu": cpu.get("cpU_Usage") if cpu else None,
-        "temperature": cpu.get("temperature") if cpu else None,
+        # 0 = MultiProbe could not read the sensor on that computer, not a real temperature
+        "temperature": (cpu.get("temperature") or None) if cpu else None,
         "disks": disks,
         "objects": [{"name": o.get("objectName") or "", "count": o.get("objectCount") or 0}
                     for o in content.get("objectStatistics") or [] if o.get("objectCount")],

@@ -352,6 +352,32 @@ tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 .menu-sep { color: var(--muted); font-size: 12px; padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 4px; }
 .menu-empty { color: var(--muted); font-size: 12px; padding: 4px 10px 8px; }
 @media (max-width: 900px) { .ov-grid { grid-template-columns: 1fr; } }
+/* Overview: servers (load, objects, licences) */
+.ov-col { min-width: 0; }
+/* The problems list beside it takes the height of the left column (at least its usual 420px). */
+.ov-grid > .card { display: flex; flex-direction: column; }
+.ov-grid > .card .ov-list { flex: 1 1 0; min-height: 420px; max-height: none; }
+.srv-block + .srv-block { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
+.srv-head { margin-bottom: 4px; }
+.srv-node { margin-top: 8px; }
+.srv-node-name { font-weight: 500; }
+.srv-load { margin: 8px 0; }
+.srv-meter { display: grid; grid-template-columns: 60px 1fr 40px 44px; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+.srv-meter > span:first-child { color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-meter b { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+.srv-track { display: block; height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.srv-track i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.srv-track i.warm { background: var(--degraded); }
+.srv-track i.hot { background: var(--outage); }
+.srv-counts { display: grid; grid-template-columns: 1fr auto; gap: 3px 16px; margin: 8px 0 0; font-size: 13px; }
+.srv-counts dt { color: var(--text-soft); }
+.srv-counts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.srv-lic { margin-top: 10px; font-size: 13px; }
+.srv-lic summary { cursor: pointer; color: var(--text-soft); }
+.srv-lic-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.srv-lic-table td { padding: 3px 0; }
+.srv-lic-table td.num-cell { padding: 3px 10px; white-space: nowrap; color: var(--text-soft); }
+.srv-lic-bar { width: 30%; }
 
 /* Servers */
 .node-list { display: flex; flex-direction: column; gap: 6px; }

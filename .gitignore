@@ -19,3 +19,6 @@ docs/swagger.json
 
 # Report templates database
 data/
+
+# Answers saved by tools/probe_node_info.py (server details)
+node_info*.json

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, sessions, storage
+from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -567,6 +567,12 @@ async def overview_page(request: Request, session: sessions.Session = Depends(cu
 @app.get("/api/overview/state")
 async def api_overview_state(session: sessions.Session = Depends(current_session)):
     return await overview.current_state(session.scoped(), _user_tz(session))
+
+
+@app.get("/api/overview/servers")
+async def api_overview_servers(session: sessions.Session = Depends(current_session)):
+    """Load, objects and licences of the shown servers (MultiProbe's Administration -> Nodes)."""
+    return await server_info.servers(session.scoped(), _user_tz(session))
 
 
 @app.get("/api/overview/top")

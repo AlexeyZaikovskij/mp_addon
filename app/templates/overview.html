@@ -19,14 +19,21 @@
 </section>
 
 <div class="ov-grid">
-  <section class="card">
-    <h2>{{ t("ov_state_now") }}</h2>
-    <div class="ov-pie-wrap">
-      <div id="pie" class="ov-pie"></div>
-      <ul class="ov-legend" id="legend"></ul>
-    </div>
-    <p class="muted note">{{ t("ov_state_hint") }}</p>
-  </section>
+  <div class="ov-col">
+    <section class="card">
+      <h2>{{ t("ov_state_now") }}</h2>
+      <div class="ov-pie-wrap">
+        <div id="pie" class="ov-pie"></div>
+        <ul class="ov-legend" id="legend"></ul>
+      </div>
+      <p class="muted note">{{ t("ov_state_hint") }}</p>
+    </section>
+
+    <section class="card" id="srv-card" hidden>
+      <h2>{{ t("ov_srv_title") }}</h2>
+      <div id="srv-info"></div>
+    </section>
+  </div>
 
   <section class="card">
     <div class="section-head">

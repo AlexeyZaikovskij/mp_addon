@@ -113,6 +113,66 @@
     }
   }
 
+  // --- Servers: load, objects, licences (MultiProbe's Administration -> Nodes) ----------------------
+  const meter = (label, pct, extra = "") => `
+    <div class="srv-meter"><span>${escapeHtml(label)}</span>
+      <span class="srv-track"><i class="${pct >= 90 ? "hot" : pct >= 75 ? "warm" : ""}" style="width:${Math.min(100, pct)}%"></i></span>
+      <b>${Math.round(pct)}%</b>${extra}</div>`;
+  const offNote = (n) => n ? ` <span class="muted">(${escapeHtml(T.ov_srv_off.replace("{n}", n))})</span>` : "";
+
+  function nodeBlock(n, multiNode) {
+    const load = n.cpu !== null
+      ? meter(T.ov_srv_cpu, n.cpu, n.temperature !== null ? ` <span class="muted">${Math.round(n.temperature)} °C</span>` : "")
+      : "";
+    const disks = n.disks.map((d) => meter(d.name, d.used)).join("");
+    const counts = [
+      ...n.objects.map((o) => [o.name, o.count, ""]),
+      n.encoders ? [T.ov_srv_encoders, n.encoders, offNote(n.encoders_off)] : null,
+      n.recordings ? [T.ov_srv_recordings, n.recordings, offNote(n.recordings_off)] : null,
+    ].filter(Boolean);
+    return `<div class="srv-node">
+      ${multiNode ? `<div class="srv-node-name">${escapeHtml(n.name)}</div>` : ""}
+      <div class="muted small">${escapeHtml([n.description, n.ip].filter(Boolean).join(" · "))}</div>
+      ${load || disks ? `<div class="srv-load">${load}${disks}</div>` : `<div class="muted small srv-load">${escapeHtml(T.ov_srv_no_load)}</div>`}
+      ${counts.length ? `<dl class="srv-counts">${counts.map(([k, v, x]) =>
+        `<dt>${escapeHtml(k)}</dt><dd>${v}${x}</dd>`).join("")}</dl>` : ""}
+    </div>`;
+  }
+
+  const openLicences = new Set(); // servers whose licence list stays open across refreshes
+  $("#srv-info").addEventListener("toggle", (e) => {
+    const id = e.target.dataset.server;
+    if (id !== undefined) e.target.open ? openLicences.add(id) : openLicences.delete(id);
+  }, true);
+
+  function licenceBlock(l, serverId) {
+    const head = l.alive === false ? `<span class="bad-text">${escapeHtml(T.ov_srv_licence_dead)}</span>`
+      : l.until ? `<span class="${l.days_left <= 14 ? "bad-text" : ""}">${escapeHtml(T.ov_srv_licence_until.replace("{date}", l.until).replace("{days}", l.days_left))}</span>`
+      : escapeHtml(T.ov_srv_licence_permanent);
+    return `<details class="srv-lic" data-server="${serverId}"${openLicences.has(String(serverId)) ? " open" : ""}><summary>${head} · ${escapeHtml(T.ov_srv_licences)}: ${l.items.length}</summary>
+      <table class="srv-lic-table">${l.items.map((i) => `<tr title="${escapeHtml(i.short)}">
+        <td>${escapeHtml(i.name)}</td><td class="num-cell">${i.used} / ${i.total}</td>
+        <td class="srv-lic-bar"><span class="srv-track"><i class="${i.used >= i.total ? "hot" : i.used / i.total >= 0.8 ? "warm" : ""}"
+          style="width:${i.total ? Math.min(100, 100 * i.used / i.total) : 0}%"></i></span></td></tr>`).join("")}</table>
+    </details>`;
+  }
+
+  async function loadServers() {
+    try {
+      const data = await api("/api/overview/servers");
+      $("#srv-card").hidden = !data.servers.length && !data.errors.length;
+      $("#srv-info").innerHTML = data.servers.map((s) => `<div class="srv-block">
+          <div class="srv-head"><b>${escapeHtml(s.server)}</b>${s.version ? ` <span class="muted small">MultiProbe ${escapeHtml(s.version)}</span>` : ""}</div>
+          ${s.nodes.map((n) => nodeBlock(n, s.nodes.length > 1)).join("")}
+          ${licenceBlock(s.licence, s.server_id)}
+        </div>`).join("") + data.errors.map((e) =>
+        `<div class="error small">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
+    } catch (err) {
+      $("#srv-card").hidden = false;
+      $("#srv-info").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
   // --- Most problematic channels ------------------------------------------------------
   let topHours = 24;
   let topSeq = 0;
@@ -205,10 +265,10 @@
   let timer = null;
   function schedule() {
     clearInterval(timer);
-    if ($("#auto").checked) timer = setInterval(loadState, REFRESH_MS);
+    if ($("#auto").checked) timer = setInterval(() => { loadState(); loadServers(); }, REFRESH_MS);
   }
   $("#auto").addEventListener("change", schedule);
-  $("#refresh").addEventListener("click", () => { loadState(); loadTop(); });
+  $("#refresh").addEventListener("click", () => { loadState(); loadServers(); loadTop(); });
 
   // Which connected server the overview shows (also the Recordings page's pick).
   $("#scope")?.addEventListener("change", async (e) => {
@@ -220,10 +280,12 @@
       return;
     }
     loadState();
+    loadServers();
     loadTop();
   });
 
   loadState();
+  loadServers();
   loadTop();
   schedule();
 })();

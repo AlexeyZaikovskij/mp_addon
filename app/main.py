@@ -1356,7 +1356,8 @@ async def _check_login(srv: dict, body: ConnectIn, t) -> tuple[str, dict]:
     except mp_client.MPAuthError as exc:
         msg = {"authErrorUserDisabled": t("err_user_disabled"), "authErrorUserBanned": t("err_user_banned")}.get(
             exc.code, t("err_wrong_credentials"))
-        raise HTTPException(401, msg)
+        # Not 401: the pages read 401 as "the Toolkit session expired" and go to the Toolkit sign-in.
+        raise HTTPException(400, msg)
     except mp_client.MPError as exc:
         if exc.status in (404, 405) and "<html" in exc.message.lower():
             # A web server answered, not the MultiProbe API (e.g. nginx serving the web interface).

@@ -197,10 +197,7 @@ async def _node_ip(conn, node_id: int) -> str:
     return content.get("mainIPAddress") or ""
 
 
-async def server_services(conn, tz) -> dict[str, Any]:
-    """The services of one server: per node what Guard manages; on this computer, every Stream Labs service."""
-    local = is_local(conn.url)
-    admin = local and is_admin()
+async def _guard_nodes(conn) -> tuple[list[dict], list[list[dict]], list[str], list]:
     nodes = await mp_client.nodes(conn)
     softwares, ips = await asyncio.gather(
         asyncio.gather(*(guard_software(conn, n["nodeID"]) for n in nodes)),
@@ -208,6 +205,27 @@ async def server_services(conn, tz) -> dict[str, Any]:
     )
     statuses = await asyncio.gather(*(guard_status(conn, n["nodeID"], sw) for n, sw in zip(nodes, softwares)),
                                     return_exceptions=True)
+    return nodes, softwares, ips, statuses
+
+
+THIS_PC_NODE = 0  # the node id used for this computer when MultiProbe itself does not answer
+
+
+async def server_services(conn, tz) -> dict[str, Any]:
+    """The services of one server: per node what Guard manages; on this computer, every Stream Labs service.
+
+    On this computer with administrator rights every service goes through Windows: any of them can be stopped
+    and started again, even when MultiProbe (its API) is down — then the services are listed without nodes."""
+    local = is_local(conn.url)
+    admin = local and is_admin()
+    api_error = None
+    try:
+        nodes, softwares, ips, statuses = await _guard_nodes(conn)
+    except Exception as exc:  # noqa: BLE001 — on this computer Windows still has the answer
+        if not local:
+            raise
+        api_error = getattr(exc, "message", "") or str(exc)
+        nodes, softwares, ips, statuses = [{"nodeID": THIS_PC_NODE, "name": ""}], [[]], [""], [{}]
     win = {s["name"]: s for s in await windows_services()} if local else {}
     # The node on this computer gets the Windows view; with one node on a local server, that is it.
     here = next((i for i, ip in enumerate(ips) if ip in _local_addresses()), 0 if local and len(nodes) == 1 else None)
@@ -228,20 +246,31 @@ async def server_services(conn, tz) -> dict[str, Any]:
         if on_this_pc:
             for name, w in win.items():
                 row = rows.setdefault(name, {"name": name, "software_id": None, "version": "", "via": "windows",
-                                             "can_control": admin})
+                                             "can_control": False})
                 row.update(status=w["status"], start_type=w["start_type"], since=_since(w["since"], tz))
-                if not row["can_control"] and admin:  # Guard cannot restart itself; Windows can
+                if admin:  # Windows itself, independent of MultiProbe: every service, Guard included
                     row.update(via="windows", can_control=True)
         for row in rows.values():
             row["protected"] = protected(row["name"])
+            # Stopped through MultiProbe, these could not be started again from here; through Windows they can.
+            row["can_stop"] = row["can_control"] and (row["via"] == "windows" or not row["protected"])
             row["can_set_start"] = on_this_pc and admin
             row["display"] = row["name"].removeprefix("Stream Labs MP ").removesuffix(" Service") or row["name"]
         out_nodes.append({
             "id": node["nodeID"], "name": node.get("name") or "", "this_pc": on_this_pc,
             "error": str(status)[:300] if isinstance(status, Exception) else None,
-            "services": sorted(rows.values(), key=lambda r: (r["via"] != "windows", r["display"].lower())),
+            "services": sorted(rows.values(), key=lambda r: (r["software_id"] is not None, r["display"].lower())),
         })
-    return {"server_id": conn.server_id, "server": conn.name, "local": local, "admin": admin, "nodes": out_nodes}
+    return {"server_id": conn.server_id, "server": conn.name, "local": local, "admin": admin,
+            "api_error": api_error, "nodes": out_nodes}
+
+
+# MultiProbe comes up in this order (the rest after them) and goes down in the reverse one.
+START_ORDER = ("Database Agent", "Backend", "Frontend", "Guard", "App Manager")
+
+
+def _rank(name: str) -> int:
+    return next((i for i, p in enumerate(START_ORDER) if f"MP {p} Service" in name), len(START_ORDER))
 
 
 async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str]:
@@ -256,7 +285,7 @@ async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str
         row = rows.get(name)
         if row is None:
             failed.append(f"{name}: not found")
-        elif action == "stop" and row["protected"]:
+        elif action == "stop" and not row["can_stop"]:
             failed.append(f"{row['display']}: can only be restarted")
         elif not row["can_control"]:
             failed.append(f"{row['display']}: cannot be controlled from here")
@@ -264,6 +293,7 @@ async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str
             guard_ids.append(row["software_id"])
         else:
             win_names.append(name)
+    win_names.sort(key=_rank, reverse=action == "stop")
 
     async def by_guard():
         if guard_ids:
@@ -273,7 +303,7 @@ async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str
                 failed.append(f"Guard: {getattr(exc, 'message', '') or exc}")
 
     async def by_windows():
-        for name in win_names:  # one by one: a service may need another one running first
+        for name in win_names:  # one by one, in order: a service may need another one running first
             try:
                 await windows_action(name, action)
             except ServiceError as exc:
@@ -283,4 +313,18 @@ async def act(conn, node_id: int, names: list[str], action: str, tz) -> list[str
     first, second = (by_windows, by_guard) if action == "start" else (by_guard, by_windows)
     await first()
     await second()
+    return failed
+
+
+async def set_start_types(names: list[str], start_type: str) -> list[str]:
+    """Change the start type of several services on this computer. Returns the failures."""
+    failed = []
+    for name in names:
+        if not name.startswith(WIN_PREFIX):
+            failed.append(f"{name}: not a MultiProbe service")
+            continue
+        try:
+            await set_start_type(name, start_type)
+        except ServiceError as exc:
+            failed.append(f"{name.removeprefix('Stream Labs MP ').removesuffix(' Service')}: {exc}")
     return failed

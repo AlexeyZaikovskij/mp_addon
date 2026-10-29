@@ -1459,7 +1459,7 @@ async def api_services_action(body: ServiceActionIn, session: sessions.Session =
 
 class StartTypeIn(BaseModel):
     server_id: int
-    name: str
+    names: list[str] = Field(min_length=1)
     start_type: Literal["automatic", "delayed", "manual", "disabled"]
 
 
@@ -1471,13 +1471,7 @@ async def api_services_start_type(body: StartTypeIn, request: Request,
     conn = session.conn(body.server_id)
     if not services.is_local(conn.url) or not services.is_admin():
         raise HTTPException(403, t("svc_err_start_type"))
-    if not body.name.startswith(services.WIN_PREFIX):
-        raise HTTPException(422, "Not a MultiProbe service")
-    try:
-        await services.set_start_type(body.name, body.start_type)
-    except services.ServiceError as exc:
-        raise HTTPException(502, str(exc))
-    return {"ok": True}
+    return {"failed": await services.set_start_types(body.names, body.start_type)}
 
 
 class ScopeIn(BaseModel):

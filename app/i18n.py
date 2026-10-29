@@ -217,9 +217,24 @@ STRINGS: dict[str, dict[str, str]] = {
     "svc_start_all": {"en": "Start all", "ru": "Запустить все"},
     "svc_stop_all": {"en": "Stop all", "ru": "Остановить все"},
     "svc_protected": {
-        "en": "MultiProbe and the Toolkit work through this service: it can be restarted, not stopped",
-        "ru": "Через эту службу работают MultiProbe и Toolkit: её можно перезапустить, но не остановить",
+        "en": "MultiProbe and the Toolkit work through this service. Through MultiProbe Guard it can only be restarted (stopped, it could not be started again from here); on this computer, through Windows, it can be stopped too",
+        "ru": "Через эту службу работают MultiProbe и Toolkit. Через MultiProbe Guard её можно только перезапустить (остановленную, её отсюда уже не запустить); на этом компьютере, через Windows, её можно и остановить",
     },
+    "svc_confirm_protected": {
+        "en": "Warning: MultiProbe works through {names}. While stopped, MultiProbe and the Toolkit's other pages do not work for this server; start them again here.",
+        "ru": "Внимание: через {names} работает MultiProbe. Пока они остановлены, MultiProbe и остальные страницы Toolkit для этого сервера не работают; запустить их снова можно здесь.",
+    },
+    "svc_local_admin": {
+        "en": "This computer, administrator rights: every service is controlled through Windows, even when MultiProbe itself is stopped.",
+        "ru": "Этот компьютер, права администратора: всеми службами управляет Windows — даже когда сам MultiProbe остановлен.",
+    },
+    "svc_api_down": {
+        "en": "MultiProbe does not answer ({msg}): the services of this computer are shown by Windows.",
+        "ru": "MultiProbe не отвечает ({msg}): службы этого компьютера показаны по данным Windows.",
+    },
+    "svc_selected": {"en": "Selected: {n}", "ru": "Выбрано: {n}"},
+    "svc_select_all": {"en": "Select all", "ru": "Выбрать все"},
+    "svc_clear_selection": {"en": "Clear selection", "ru": "Снять выбор"},
     "svc_view_only": {"en": "View only", "ru": "Только просмотр"},
     "svc_st_running": {"en": "Running", "ru": "Работает"},
     "svc_st_stopped": {"en": "Stopped", "ru": "Остановлена"},
@@ -233,10 +248,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "svc_type_manual": {"en": "Manual", "ru": "Вручную"},
     "svc_type_disabled": {"en": "Disabled", "ru": "Отключена"},
     "svc_confirm": {"en": "{action}: {names}?", "ru": "{action}: {names}?"},
-    "svc_confirm_all_stop": {
-        "en": "Stop {n} services on {node}? Backend, Frontend, App Manager, Database Agent and Guard stay running.",
-        "ru": "Остановить {n} служб на {node}? Backend, Frontend, App Manager, Database Agent и Guard продолжат работать.",
-    },
+    "svc_confirm_all_stop": {"en": "Stop {n} running services on {node}?", "ru": "Остановить {n} работающих служб на {node}?"},
     "svc_confirm_all_start": {"en": "Start {n} stopped services on {node}?", "ru": "Запустить {n} остановленных служб на {node}?"},
     "svc_nothing": {"en": "Nothing to do: no services in that state.", "ru": "Делать нечего: нет служб в таком состоянии."},
     "svc_done": {"en": "Done: {action} — {names}", "ru": "Готово: {action} — {names}"},

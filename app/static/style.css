@@ -487,3 +487,9 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .svc-st-startPending, .svc-st-stopPending, .svc-st-continuePending, .svc-st-pausePending, .svc-st-paused { color: var(--warn-text); }
 .svc-st-unknown { color: var(--muted); }
 .btn.danger-btn { color: var(--error-text); }
+.svc-pick { width: 28px; }
+.svc-pick input { margin: 0; }
+.svc-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 10px;
+  background: var(--accent-soft); border-radius: 6px; font-size: 13px; }
+.svc-bulk > span:first-child { font-weight: 500; margin-right: 6px; }
+.svc-bulk-sep { color: var(--text-soft); margin-left: 10px; }

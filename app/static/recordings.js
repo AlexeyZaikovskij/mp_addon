@@ -66,7 +66,7 @@
   }
   $("#task").addEventListener("change", () => { pickTask(Number($("#task").value)); loadTimeline(); });
 
-  // The same pick as the header's server switcher (shown only with several connected servers).
+  // The same pick as the overview's server switcher (shown only with several connected servers).
   function renderServers(servers, scope) {
     $("#server-pick").hidden = servers.length < 2;
     $("#server").innerHTML = `<option value="">${escapeHtml(T.scope_all)}</option>` + servers.map((s) =>
@@ -76,8 +76,6 @@
     const v = $("#server").value;
     try {
       await api("/api/scope", { server_id: v === "" ? null : Number(v) });
-      const header = document.getElementById("scope");
-      if (header) header.value = v;
       await loadTasks();
     } catch (err) {
       $("#server-errors").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;

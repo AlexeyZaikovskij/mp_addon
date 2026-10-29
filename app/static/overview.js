@@ -210,6 +210,19 @@
   $("#auto").addEventListener("change", schedule);
   $("#refresh").addEventListener("click", () => { loadState(); loadTop(); });
 
+  // Which connected server the overview shows (also the Recordings page's pick).
+  $("#scope")?.addEventListener("change", async (e) => {
+    const v = e.target.value;
+    try {
+      await api("/api/scope", { server_id: v === "" ? null : Number(v) });
+    } catch (err) {
+      $("#server-errors").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+    loadState();
+    loadTop();
+  });
+
   loadState();
   loadTop();
   schedule();

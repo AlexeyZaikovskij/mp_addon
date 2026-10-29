@@ -201,10 +201,10 @@ async def wizard(request: Request, session: sessions.Session = Depends(current_s
 # --- Wizard data ------------------------------------------------------------
 
 @app.get("/api/nodes")
-async def api_nodes(all: bool = False, session: sessions.Session = Depends(current_session)):
-    """Probe nodes of the server picked in the header (or of every connected server with all=true, as a
-    template that spans several servers needs). A server that fails is reported, not fatal."""
-    conns = session.scoped() if not all else sorted(session.conns.values(), key=lambda c: c.name.lower())
+async def api_nodes(session: sessions.Session = Depends(current_session)):
+    """Probe nodes of every connected server (the wizard groups them by server). A server that fails is
+    reported, not fatal."""
+    conns = sorted(session.conns.values(), key=lambda c: c.name.lower())
     results = await asyncio.gather(*(mp_client.nodes(c) for c in conns), return_exceptions=True)
     out, errors = [], []
     for c, res in zip(conns, results):
@@ -213,7 +213,7 @@ async def api_nodes(all: bool = False, session: sessions.Session = Depends(curre
             continue
         for n in sorted(res, key=lambda n: n["name"]):
             out.append({"server_id": c.server_id, "server": c.name, "id": n["nodeID"], "name": n["name"]})
-    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1 or len(session.conns) > 1,
+    return {"nodes": out, "errors": errors, "multi_server": len(conns) > 1,
             "connected": bool(session.conns)}
 
 
@@ -593,7 +593,7 @@ async def recordings_page(request: Request, session: sessions.Session = Depends(
 
 @app.get("/api/rec/tasks")
 async def api_rec_tasks(session: sessions.Session = Depends(current_session)):
-    """Recording tasks of the server picked in the header (or of all connected servers)."""
+    """Recording tasks of the picked server (or of all connected servers)."""
     conns = session.scoped()
     results = await asyncio.gather(*(recordings.tasks(c) for c in conns), return_exceptions=True)
     out, errors = [], []
@@ -1419,7 +1419,7 @@ class ScopeIn(BaseModel):
 
 @app.post("/api/scope")
 async def api_scope(body: ScopeIn, session: sessions.Session = Depends(current_session)):
-    """The header's server switcher: which server the overview and the wizard show."""
+    """The server switcher of the overview and the recordings page: which connected server they show."""
     if body.server_id is not None:
         session.conn(body.server_id)  # must be connected
     session.scope = body.server_id

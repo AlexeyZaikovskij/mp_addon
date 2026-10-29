@@ -20,7 +20,7 @@ class Session:
     user: dict[str, Any]                          # the Toolkit user (storage.app_user row, no password)
     conns: dict[int, Conn] = field(default_factory=dict)
     logins: dict[int, str] = field(default_factory=dict)  # server id -> MultiProbe login used there
-    scope: int | None = None  # server picked in the header switcher; None = all connected servers
+    scope: int | None = None  # server picked on the overview / recordings page; None = all connected servers
     auto_errors: dict[int, str] = field(default_factory=dict)  # server id -> why the automatic sign-in failed
     last_seen: float = field(default_factory=time.monotonic)
 

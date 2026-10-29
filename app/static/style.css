@@ -315,6 +315,9 @@ tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 /* Overview */
 .overview-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .overview-head h1 { margin: 0; }
+.overview-title { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.overview-title .scope { font-size: 14px; }
+.overview-title .scope select { padding: 5px 8px; min-width: 180px; }
 .overview-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .ov-grid { display: grid; grid-template-columns: minmax(300px, 1fr) 2fr; gap: 16px; }
 .ov-pie-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

@@ -79,11 +79,28 @@ _PS_LIST = (
     "$ids = @($s | Where-Object ProcessId | ForEach-Object { \"ProcessId=$($_.ProcessId)\" });"
     "$p = @{}; if ($ids) { Get-CimInstance Win32_Process -Filter ($ids -join ' OR ') |"
     " ForEach-Object { $p[[int]$_.ProcessId] = $_.CreationDate } };"
-    "$s | ForEach-Object {"
+    "$svc = @($s | ForEach-Object { $exe = $_.PathName.Trim('\"') -replace '\"\\s.*$','';"
     " [pscustomobject]@{ name = $_.Name; state = $_.State; mode = $_.StartMode; delayed = [bool]$_.DelayedAutoStart;"
-    " since = if ($_.ProcessId) { $p[[int]$_.ProcessId].ToString('o') } else { $null } } }"
-    " | ConvertTo-Json -Compress"
+    " since = if ($_.ProcessId) { $p[[int]$_.ProcessId].ToString('o') } else { $null }; exe = $exe;"
+    " file_version = if (Test-Path -LiteralPath $exe) { (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion } else { $null } } });"
+    # What the installers registered ("Programs and Features"): the version of each installed component.
+    r"$inst = @(Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',"
+    r" 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |"
+    " ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.InstallLocation -and $_.DisplayVersion } |"
+    " ForEach-Object { [pscustomobject]@{ location = $_.InstallLocation; version = $_.DisplayVersion } });"
+    "[pscustomobject]@{ services = $svc; installed = $inst } | ConvertTo-Json -Compress -Depth 3"
 )
+
+
+def _installed_version(exe: str, installed: list[dict]) -> str:
+    """The version the installer registered for the folder the service's exe is in (the deepest match wins)."""
+    folder = exe.lower().rsplit("\\", 1)[0]
+    best, depth = "", -1
+    for item in installed:
+        loc = (item.get("location") or "").lower().rstrip("\\")
+        if loc and (folder == loc or folder.startswith(loc + "\\")) and len(loc) > depth:
+            best, depth = item.get("version") or "", len(loc)
+    return best
 
 
 async def _run(*args: str, timeout: float = 30) -> tuple[int, str]:
@@ -101,14 +118,16 @@ async def windows_services() -> list[dict]:
     code, out = await _run("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS_LIST)
     if code != 0:
         raise ServiceError(out.strip()[:300])
-    items = json.loads(out) if out.strip() else []
-    items = items if isinstance(items, list) else [items]
+    data = json.loads(out) if out.strip() else {}
+    items, installed = data.get("services") or [], data.get("installed") or []
     return [{
         "name": s["name"],
         "status": _WIN_STATE.get(s["state"], s["state"]),
         "start_type": "disabled" if s["mode"] == "Disabled" else "manual" if s["mode"] == "Manual"
         else "delayed" if s["delayed"] else "automatic",
         "since": s.get("since"),
+        # The installer's version; without one, the exe's own (without the "+commit" tail)
+        "version": _installed_version(s.get("exe") or "", installed) or (s.get("file_version") or "").split("+")[0].strip(),
     } for s in items]
 
 
@@ -283,7 +302,8 @@ async def server_services(conn, tz) -> dict[str, Any]:
             for name, w in win.items():
                 row = rows.setdefault(name, {"name": name, "software_id": None, "version": "", "via": "windows",
                                              "can_control": False})
-                row.update(status=w["status"], start_type=w["start_type"], since=_since(w["since"], tz))
+                row.update(status=w["status"], start_type=w["start_type"], since=_since(w["since"], tz),
+                           version=w["version"] or row["version"])
                 if admin:  # Windows itself, independent of MultiProbe: every service, Guard included
                     row.update(via="windows", can_control=True)
         for row in rows.values():

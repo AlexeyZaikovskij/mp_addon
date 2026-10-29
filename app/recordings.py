@@ -24,6 +24,9 @@ from .mp_client import Conn
 PIECE_IDLE_TTL = 3600  # a piece nobody played or saved for this long is dropped (with its MultiProbe task)
 PIECES_PER_USER = 3  # older pieces of the same user are dropped first
 STALL_TIMEOUT = 180  # seconds without progress before giving up on MultiProbe
+# MultiProbe removes a download task it has not heard about for ~1.5 min, even half-written; its own player
+# extends the task every 30 s (DownloadTask/ExtendTask).
+EXTEND_EVERY = 30
 MEDIA_STATES = {"data", "datawithAD", "reservesourcedata"}
 _FILE_NAME = re.compile(r"^[\w.-]+\.(m3u8|ts|aac|m4s|mp4)$")
 EXPORT_DIR = Path(tempfile.gettempdir()) / "mp_toolkit_exports"
@@ -120,6 +123,7 @@ class Piece:
     node_id: int
     used: float = field(default_factory=time.monotonic)
     ended: bool = False  # every media playlist has #EXT-X-ENDLIST: MultiProbe has written the whole piece
+    keeper: asyncio.Task | None = None
 
     @property
     def base(self) -> str:
@@ -129,8 +133,33 @@ class Piece:
 _pieces: dict[str, Piece] = {}
 
 
+async def _extend(conn: Conn, download_task_id: str) -> None:
+    try:
+        await mp_client.call(conn, "POST", f"/api/Recording/DownloadTask/ExtendTask/{download_task_id}")
+    except mp_client.MPError:
+        pass  # a missed extension is caught up by the next one
+
+
+async def _keep_alive(conn: Conn, download_task_id: str) -> None:
+    while True:
+        await asyncio.sleep(EXTEND_EVERY)
+        await _extend(conn, download_task_id)
+
+
+async def _keep_piece(piece: Piece) -> None:
+    """The piece's task lives while the piece does: until it is dropped, or nobody uses it for PIECE_IDLE_TTL."""
+    while piece.id in _pieces:
+        await asyncio.sleep(EXTEND_EVERY)
+        if time.monotonic() - piece.used > PIECE_IDLE_TTL:
+            await _drop(piece)
+        elif piece.id in _pieces:
+            await _extend(piece.conn, piece.download_task_id)
+
+
 async def _drop(piece: Piece) -> None:
     _pieces.pop(piece.id, None)
+    if piece.keeper and piece.keeper is not asyncio.current_task():
+        piece.keeper.cancel()
     try:
         await mp_client.call(piece.conn, "DELETE", f"/api/Recording/DownloadTask/Delete/{piece.download_task_id}")
     except mp_client.MPError:
@@ -157,6 +186,7 @@ async def create(owner: str, conn: Conn, task_id: str, name: str, begin: datetim
     piece = Piece(id=secrets.token_urlsafe(12), owner=owner, conn=conn, task_id=task_id, name=name, begin=begin,
                   end=end, download_task_id=dt["downloadTaskID"], node_id=dt["nodeID"])
     _pieces[piece.id] = piece
+    piece.keeper = asyncio.create_task(_keep_piece(piece))
     return piece
 
 
@@ -283,6 +313,7 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     purge_exports()
     source = EXPORT_DIR / f"{job.id}.src.ts"
+    keeper = asyncio.create_task(_keep_alive(conn, dt_id))  # cutting and downloading can take minutes
     try:
         last, last_change = None, time.monotonic()
         while True:
@@ -325,6 +356,7 @@ async def export(job: jobs.Job, conn: Conn, task_id: str, begin: datetime, end: 
             out.unlink(missing_ok=True)  # no half-written files
             raise
     finally:
+        keeper.cancel()
         source.unlink(missing_ok=True)
         try:  # the cut file is not needed on the MultiProbe side any more
             await mp_client.call(conn, "DELETE", f"/api/Recording/DownloadTask/Delete/{dt_id}")

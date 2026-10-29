@@ -106,6 +106,9 @@ Checked on MultiProbe 26.9 (one node, local storages).
   `encoder`, `decoder`, `render` objects (empty is fine) is required** even for plain `download` / `stream`,
   otherwise 500 "Object reference not set…". Progress in `DownloadTask/Find` →
   `downloadTaskStateLog.downloadTaskState` / `downloadPercent`. Delete with `DownloadTask/Delete/{id}`.
+  **MultiProbe removes a download task nobody extends after ~1.5 min**, even half-written (an 8 min `stream`
+  piece vanished from `Find` at ~86 s with 174 s written). Its own player calls `POST
+  DownloadTask/ExtendTask/{id}` (no body, empty answer) every 30 s; with that the piece is written to the end.
   - `download`: the original TS (as recorded: Alaska 1920x1080 H.264 + AAC) is written to
     `<workingPath>\Exporter Files\<downloadTaskID>\<name>.ts`; `url` = `/export/<id>/<name>.ts`, served at
     **`http://<mp>:40000/fromAppManager/<nodeID>/export/<id>/<name>`** (URL-encode the name; this is what the

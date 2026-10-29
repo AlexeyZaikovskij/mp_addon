@@ -76,8 +76,11 @@
     </div>`;
   }
 
+  // The server picked next to the title ("" = all servers); without the switcher, every job.
+  const scope = () => $("#scope")?.value || "";
+
   function renderJobs() {
-    const jobs = state.jobs;
+    const jobs = state.jobs.filter((j) => !scope() || String(j.params.server_id) === scope());
     if (!jobs.length) { $("#jobs").innerHTML = `<p class="muted">${escapeHtml(T.sch_no_jobs)}</p>`; return; }
     $("#jobs").innerHTML = jobs.map((j) => {
       const p = j.params, last = j.runs[0];
@@ -149,7 +152,16 @@
   const toMs = (s) => Date.parse(`${s.length === 16 ? s + ":00" : s}Z`);
   const fromMs = (ms) => new Date(ms).toISOString().slice(0, 19);
 
-  $("#new-job").addEventListener("click", async () => {
+  $("#scope")?.addEventListener("change", async () => {
+    try {
+      await api("/api/scope", "POST", { server_id: scope() === "" ? null : Number(scope()) });
+    } catch (err) { message(err.message, true); return; }
+    renderJobs();
+    if (!$("#job-form").hidden) await openForm(); // the channel list follows the pick
+  });
+
+  $("#new-job").addEventListener("click", openForm);
+  async function openForm() {
     $("#job-form").hidden = false;
     $("#f-error").hidden = true;
     try {
@@ -164,7 +176,7 @@
       $("#f-start").value = fromMs(toMs(state.now) + 3600_000).slice(0, 16);
       await onTask();
     } catch (err) { $("#f-error").hidden = false; $("#f-error").textContent = err.message; }
-  });
+  }
   $("#f-cancel").addEventListener("click", () => { $("#job-form").hidden = true; });
 
   const task = () => tasks[Number($("#f-task").value)] || null;

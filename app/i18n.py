@@ -295,8 +295,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "scope_label": {"en": "Server", "ru": "Сервер"},
     "scope_all": {"en": "All servers", "ru": "Все серверы"},
     "scope_hint": {
-        "en": "Which connected server the overview and the recordings page show",
-        "ru": "Какой из подключённых серверов показывают обзор и страница записей",
+        "en": "Which connected server the overview, recordings and jobs pages show",
+        "ru": "Какой из подключённых серверов показывают обзор, записи и задания",
     },
     "nav_servers": {"en": "Servers", "ru": "Серверы"},
     "servers_hint": {

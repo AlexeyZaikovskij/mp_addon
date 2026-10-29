@@ -66,7 +66,7 @@
   }
   $("#task").addEventListener("change", () => { pickTask(Number($("#task").value)); loadTimeline(); });
 
-  // The same pick as the overview's server switcher (shown only with several connected servers).
+  // The same pick as the overview and jobs pages (shown only with several connected servers).
   function renderServers(servers, scope) {
     $("#server-pick").hidden = servers.length < 2;
     $("#server").innerHTML = `<option value="">${escapeHtml(T.scope_all)}</option>` + servers.map((s) =>

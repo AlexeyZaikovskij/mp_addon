@@ -2,18 +2,9 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <section class="card overview-head">
-  <div class="overview-title">
+  <div class="title-row">
     <h1>{{ t("nav_overview") }}</h1>
-    {% if session.conns | length > 1 %}
-    <label class="scope" title="{{ t('scope_hint') }}">{{ t("scope_label") }}
-      <select id="scope">
-        <option value="">{{ t("scope_all") }}</option>
-        {% for c in session.conns.values() | sort(attribute="name") %}
-        <option value="{{ c.server_id }}" {{ "selected" if session.scope == c.server_id }}>{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    {% endif %}
+    {% include "_scope.html" %}
   </div>
   <div class="overview-tools">
     <span class="muted">{{ t("ov_updated") }}: <b id="updated">—</b></span>

@@ -1419,7 +1419,7 @@ class ScopeIn(BaseModel):
 
 @app.post("/api/scope")
 async def api_scope(body: ScopeIn, session: sessions.Session = Depends(current_session)):
-    """The server switcher of the overview and the recordings page: which connected server they show."""
+    """The server switcher of the overview, recordings and jobs pages: which connected server they show."""
     if body.server_id is not None:
         session.conn(body.server_id)  # must be connected
     session.scope = body.server_id

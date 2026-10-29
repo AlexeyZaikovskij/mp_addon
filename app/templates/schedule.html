@@ -3,7 +3,10 @@
 {% block content %}
 <section class="card">
   <div class="section-head">
-    <h1>{{ t("nav_schedule") }}</h1>
+    <div class="title-row">
+      <h1>{{ t("nav_schedule") }}</h1>
+      {% include "_scope.html" %}
+    </div>
     <button type="button" class="btn" id="new-job">+ {{ t("sch_new") }}</button>
   </div>
   <p class="muted">{{ t("sch_hint") }}</p>

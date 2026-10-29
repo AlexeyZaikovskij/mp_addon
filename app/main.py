@@ -603,6 +603,9 @@ async def api_rec_tasks(session: sessions.Session = Depends(current_session)):
         else:
             out += res
     return {"tasks": out, "errors": errors, "multi_server": len(conns) > 1, "connected": bool(session.conns),
+            "servers": [{"id": c.server_id, "name": c.name}
+                        for c in sorted(session.conns.values(), key=lambda c: c.name.lower())],
+            "scope": session.scope,
             "now": datetime.now(_user_tz(session)).strftime("%Y-%m-%dT%H:%M:%S")}
 
 

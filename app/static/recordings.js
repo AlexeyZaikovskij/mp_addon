@@ -42,23 +42,47 @@
     $("#no-servers").hidden = data.connected;
     $("#server-errors").innerHTML = data.errors.map((e) =>
       `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
+    renderServers(data.servers, data.scope);
     tasks = data.tasks;
+    task = null;
     $("#no-tasks").hidden = !data.connected || tasks.length > 0;
     for (const id of ["#pick", "#tl-wrap", "#period"]) $(id).hidden = !tasks.length;
     if (!tasks.length) return;
     $("#task").innerHTML = tasks.map((t, i) => {
       const where = data.multi_server ? `${t.server} · ${t.node}` : t.node;
-      return `<option value="${i}">${escapeHtml(t.name)} — ${escapeHtml(where)}${t.disabled ? ` (${escapeHtml(T.rec_disabled)})` : ""}</option>`;
+      return `<option value="${i}"${t.disabled ? ' class="rec-off"' : ""}>${escapeHtml(t.name)} — ${escapeHtml(where)}${t.disabled ? ` (${escapeHtml(T.rec_disabled)})` : ""}</option>`;
     }).join("");
-    task = tasks[0];
-    loadServices();
+    pickTask(0);
     // Default piece: 5 minutes ending 2 minutes ago (the most recent minutes are not written yet).
     const end = toMs(nowStr) - 120_000;
     setPeriod(end - 300_000, end);
     centerOn(end - 150_000);
   }
 
-  $("#task").addEventListener("change", () => { task = tasks[Number($("#task").value)]; loadTimeline(); loadServices(); });
+  function pickTask(i) {
+    task = tasks[i];
+    $("#task").classList.toggle("rec-off", !!task.disabled); // the closed list shows the pick greyed too
+    loadServices();
+  }
+  $("#task").addEventListener("change", () => { pickTask(Number($("#task").value)); loadTimeline(); });
+
+  // The same pick as the header's server switcher (shown only with several connected servers).
+  function renderServers(servers, scope) {
+    $("#server-pick").hidden = servers.length < 2;
+    $("#server").innerHTML = `<option value="">${escapeHtml(T.scope_all)}</option>` + servers.map((s) =>
+      `<option value="${s.id}"${s.id === scope ? " selected" : ""}>${escapeHtml(s.name)}</option>`).join("");
+  }
+  $("#server").addEventListener("change", async () => {
+    const v = $("#server").value;
+    try {
+      await api("/api/scope", { server_id: v === "" ? null : Number(v) });
+      const header = document.getElementById("scope");
+      if (header) header.value = v;
+      await loadTasks();
+    } catch (err) {
+      $("#server-errors").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    }
+  });
 
   // A recording of a whole stream holds every channel of it: the file is made for the channel picked here.
   let services = [];

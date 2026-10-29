@@ -382,6 +382,8 @@ p.notice { margin: 0 0 8px; }
 .rec-pick { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
 .rec-pick label, .rec-period label { color: var(--muted); font-size: 13px; }
 .rec-pick select { min-width: 340px; margin-top: 4px; }
+.rec-pick select option { color: var(--text); }
+.rec-pick select.rec-off, .rec-pick select option.rec-off { color: var(--muted); } /* recording is off */
 .rec-day { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; }
 .rec-tl-wrap { margin-bottom: 14px; }
 .rec-tl { position: relative; height: 30px; background: var(--track); border-radius: 4px; cursor: crosshair; overflow: hidden; }

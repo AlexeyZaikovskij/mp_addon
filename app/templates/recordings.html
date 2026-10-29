@@ -7,6 +7,9 @@
   <section class="notice-card" id="no-servers" hidden>
     {{ t("no_servers_connected") }} <a class="link" href="/servers">{{ t("nav_servers") }} →</a>
   </section>
+  <div class="rec-pick" id="server-pick" hidden>
+    <label title="{{ t('scope_hint') }}">{{ t("scope_label") }}<br><select id="server"></select></label>
+  </div>
   <p class="muted" id="no-tasks" hidden>{{ t("rec_no_tasks") }}</p>
 
   <div class="rec-pick" id="pick" hidden>

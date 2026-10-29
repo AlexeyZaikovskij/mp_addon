@@ -65,6 +65,11 @@ async def main(out: Path) -> None:
             nid = n.get("nodeID")
             data[f"/api/Probe/Node/GetContent?id={nid}"] = await call(conn, "POST", f"/api/Probe/Node/GetContent?id={nid}", None)
             data[f"/api/Probe/Node/GetSettings/{nid}"] = await call(conn, "GET", f"/api/Probe/Node/GetSettings/{nid}", None)
+            if n.get("nodeType") != "system":  # MultiProbe Guard: Windows services of the node (read only)
+                data[f"/api/Probe/SlmpGuard/GetServicesStatus#{nid}"] = await call(
+                    conn, "POST", "/api/Probe/SlmpGuard/GetServicesStatus", {"nodeID": nid})
+                data[f"/api/ProbeManager/CurrentSoftware/Find#{nid}"] = await call(
+                    conn, "POST", "/api/ProbeManager/CurrentSoftware/Find", {"nodeID": nid})
         result[srv["name"]] = data
         print(f"{srv['name']}: {sum(1 for v in data.values() if not (isinstance(v, dict) and '_error' in v))}/{len(data)} answered")
     await mp_client.close()

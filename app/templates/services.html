@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <div class="title-row">
+      <h1>{{ t("nav_services") }}</h1>
+      {% include "_scope.html" %}
+    </div>
+    <div class="overview-tools">
+      <span class="muted">{{ t("ov_updated") }}: <b id="updated">—</b></span>
+      <button type="button" class="link" id="refresh">{{ t("ov_refresh") }}</button>
+    </div>
+  </div>
+  <p class="muted">{{ t("svc_hint") }}</p>
+  <div id="svc-message" hidden></div>
+</section>
+
+<section class="card notice-card" id="no-servers" hidden>
+  {{ t("no_servers_connected") }} <a class="link" href="/servers">{{ t("nav_servers") }} →</a>
+</section>
+<div id="svc-servers"><section class="card"><p class="muted">{{ t("loading") }}</p></section></div>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/services.js?v={{ static_version() }}"></script>
+{% endblock %}

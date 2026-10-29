@@ -475,3 +475,15 @@ p.notice { margin: 0 0 8px; }
 .sch-st-partial { background: var(--warn-bg); color: var(--warn-text); }
 .sch-st-failed { background: var(--error-bg); color: var(--error-text); }
 span.bad { color: var(--error-text); font-weight: 500; }
+
+/* Services */
+.svc-node + .svc-node { margin-top: 18px; }
+.svc-node h3 { margin: 0; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.svc-table td { vertical-align: middle; }
+.svc-table select { min-width: 0; padding: 3px 6px; }
+.svc-st { font-weight: 500; }
+.svc-st-running { color: var(--ok-text); }
+.svc-st-stopped, .svc-st-notFound { color: var(--error-text); }
+.svc-st-startPending, .svc-st-stopPending, .svc-st-continuePending, .svc-st-pausePending, .svc-st-paused { color: var(--warn-text); }
+.svc-st-unknown { color: var(--muted); }
+.btn.danger-btn { color: var(--error-text); }

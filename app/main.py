@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, sessions, storage
+from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -1416,6 +1416,67 @@ async def api_server_job_account(server_id: int, body: ConnectIn, request: Reque
 @app.delete("/api/servers/{server_id}/job-account")
 async def api_server_job_account_delete(server_id: int, session: sessions.Session = Depends(admin_session)):
     storage.delete_credential(storage.JOBS, server_id)
+    return {"ok": True}
+
+
+# --- MultiProbe services (administrators) -----------------------------------------------------
+
+@app.get("/services", response_class=HTMLResponse)
+async def services_page(request: Request, session: sessions.Session = Depends(admin_session)):
+    return render(request, "services.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
+
+
+@app.get("/api/services")
+async def api_services(session: sessions.Session = Depends(admin_session)):
+    """Services of the shown servers. A server that fails is reported, not fatal."""
+    conns = session.scoped()
+    tz = _user_tz(session)
+    results = await asyncio.gather(*(services.server_services(c, tz) for c in conns), return_exceptions=True)
+    out, errors = [], []
+    for c, res in zip(conns, results):
+        if isinstance(res, Exception):
+            errors.append({"server_id": c.server_id, "server": c.name, "message": getattr(res, "message", "") or str(res)[:300]})
+        else:
+            out.append(res)
+    return {"servers": out, "errors": errors, "connected": bool(session.conns)}
+
+
+class ServiceActionIn(BaseModel):
+    server_id: int
+    node_id: int
+    names: list[str] = Field(min_length=1)
+    action: Literal["start", "stop", "restart"]
+
+
+@app.post("/api/services/action")
+async def api_services_action(body: ServiceActionIn, session: sessions.Session = Depends(admin_session)):
+    try:
+        failed = await services.act(session.conn(body.server_id), body.node_id, body.names, body.action, _user_tz(session))
+    except services.ServiceError as exc:
+        raise HTTPException(502, str(exc))
+    return {"failed": failed}
+
+
+class StartTypeIn(BaseModel):
+    server_id: int
+    name: str
+    start_type: Literal["automatic", "delayed", "manual", "disabled"]
+
+
+@app.post("/api/services/start-type")
+async def api_services_start_type(body: StartTypeIn, request: Request,
+                                  session: sessions.Session = Depends(admin_session)):
+    """Only on this computer, with the Toolkit running as an administrator: Guard cannot change it."""
+    t = i18n.translator(i18n.pick_lang(request))
+    conn = session.conn(body.server_id)
+    if not services.is_local(conn.url) or not services.is_admin():
+        raise HTTPException(403, t("svc_err_start_type"))
+    if not body.name.startswith(services.WIN_PREFIX):
+        raise HTTPException(422, "Not a MultiProbe service")
+    try:
+        await services.set_start_type(body.name, body.start_type)
+    except services.ServiceError as exc:
+        raise HTTPException(502, str(exc))
     return {"ok": True}
 
 

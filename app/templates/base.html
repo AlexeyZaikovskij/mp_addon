@@ -25,6 +25,7 @@
           <a href="/recordings" class="{{ 'active' if path == '/recordings' }}">{{ t("nav_recordings") }}</a>
           <a href="/schedule" class="{{ 'active' if path == '/schedule' }}">{{ t("nav_schedule") }}</a>
           <a href="/servers" class="{{ 'active' if path == '/servers' }}">{{ t("nav_servers") }}</a>
+          {% if session.is_admin %}<a href="/services" class="{{ 'active' if path == '/services' }}">{{ t("nav_services") }}</a>{% endif %}
           {% if session.is_admin %}<a href="/users" class="{{ 'active' if path == '/users' }}">{{ t("nav_users") }}</a>{% endif %}
         </nav>
         <a class="user" href="/account" title="{{ t('nav_account') }} · {{ t('time_zone') }}: {{ session.time_zone }}">{{ session.user_name }}</a>

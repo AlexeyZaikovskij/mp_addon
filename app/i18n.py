@@ -58,6 +58,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "rec_length": {"en": "Length", "ru": "Длительность"},
     "rec_min": {"en": "{n} min", "ru": "{n} мин"},
     "rec_hour": {"en": "1 h", "ru": "1 ч"},
+    "rec_min_unit": {"en": "min", "ru": "мин"},
+    "rec_length_custom": {"en": "Own length in minutes, up to {n}", "ru": "Своя длительность в минутах, до {n}"},
     "rec_play": {"en": "Play", "ru": "Воспроизвести"},
     "rec_disabled": {"en": "recording is off", "ru": "запись выключена"},
     "rec_no_tasks": {"en": "Nothing is recorded on the connected servers.", "ru": "На подключённых серверах ничего не записывается."},

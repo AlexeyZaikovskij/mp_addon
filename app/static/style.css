@@ -91,7 +91,7 @@ input, select, button { font: inherit; }
 input[type=search], input[type=datetime-local], input[name], select {
   padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--text);
 }
-input[type=date], input[type=time], input:not([type]), input[type=text], input[type=password] {
+input[type=date], input[type=time], input:not([type]), input[type=text], input[type=password], input[type=number] {
   padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--text);
 }
 input:focus, select:focus { outline: none; border-color: var(--accent); }
@@ -433,6 +433,9 @@ p.notice { margin: 0 0 8px; }
 .rec-period { align-items: flex-end; }
 .rec-period .presets { margin: 4px 0 0; }
 .rec-period input { margin-top: 4px; }
+.rec-len-custom { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.rec-period .rec-len-custom input { margin-top: 0; width: 72px; padding: 5px 8px; }
+.rec-len-custom.active input { border-color: var(--accent); }
 .rec-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
 .rec-video-wrap { position: relative; background: #070C12; border-radius: 6px; aspect-ratio: 16 / 9; overflow: hidden; }
 .rec-video-wrap video { width: 100%; height: 100%; display: block; background: #070C12; }

@@ -52,7 +52,11 @@
         <button type="button" data-min="1">{{ t("rec_min", n=1) }}</button>
         <button type="button" data-min="5">{{ t("rec_min", n=5) }}</button>
         <button type="button" data-min="15">{{ t("rec_min", n=15) }}</button>
+        <button type="button" data-min="30">{{ t("rec_min", n=30) }}</button>
         <button type="button" data-min="60">{{ t("rec_hour") }}</button>
+        <span class="rec-len-custom" title="{{ t('rec_length_custom', n=max_minutes) }}">
+          <input type="number" id="length" min="1" max="{{ max_minutes }}" step="1"> {{ t("rec_min_unit") }}
+        </span>
       </span>
     </label>
     <label>{{ t("rec_to") }}<br><input type="datetime-local" step="1" id="to"></label>

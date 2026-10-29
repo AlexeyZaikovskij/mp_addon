@@ -230,9 +230,16 @@
     renderTimeline();
   }
 
+  // The field shows the current length too; it is marked when no preset button matches it.
   function markLength() {
     const min = (toMs($("#to").value) - toMs($("#from").value)) / 60_000;
-    for (const b of document.querySelectorAll("#lengths button")) b.classList.toggle("active", Number(b.dataset.min) === min);
+    let preset = false;
+    for (const b of document.querySelectorAll("#lengths button")) {
+      b.classList.toggle("active", Number(b.dataset.min) === min);
+      preset ||= Number(b.dataset.min) === min;
+    }
+    $("#length").value = Number.isFinite(min) && min > 0 ? Math.round(min * 10) / 10 : "";
+    $(".rec-len-custom").classList.toggle("active", !preset && Number.isFinite(min) && min > 0);
   }
 
   // A piece typed in or lengthened beyond the visible window brings the window to it.
@@ -249,6 +256,12 @@
       if (Number.isFinite(begin)) setPeriod(begin, begin + Number(b.dataset.min) * 60_000);
     });
   }
+  $("#length").addEventListener("change", () => {
+    const begin = toMs($("#from").value), min = Number($("#length").value);
+    if (!Number.isFinite(begin) || !(min > 0)) { markLength(); return; }
+    setPeriod(begin, begin + Math.min(min, MAX_MIN) * 60_000);
+    followPeriod();
+  });
   $("#from").addEventListener("change", followPeriod);
   $("#to").addEventListener("change", followPeriod);
 

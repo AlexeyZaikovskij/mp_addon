@@ -50,7 +50,9 @@ window.Picker = function Picker(wrapper, opts) {
     pop.hidden = !pop.hidden;
     if (!pop.hidden) { render(); search.focus(); }
   });
-  document.addEventListener("click", (e) => { if (!pop.hidden && !wrapper.contains(e.target)) pop.hidden = true; });
+  // The path is taken when the click happens: folding a group redraws the list, so by now the clicked
+  // header may be gone from the page and wrapper.contains(e.target) would wrongly say "outside".
+  document.addEventListener("click", (e) => { if (!pop.hidden && !e.composedPath().includes(wrapper)) pop.hidden = true; });
   pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { pop.hidden = true; btn.focus(); } });
   search.addEventListener("input", render);
   list.addEventListener("click", (e) => {

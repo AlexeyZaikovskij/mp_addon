@@ -177,7 +177,7 @@ a.link { color: var(--accent); text-decoration: none; }
   color: var(--accent); text-decoration: none; font-weight: 500;
 }
 .btn:hover { background: var(--accent-soft); }
-.btn.disabled { border-color: var(--border); color: var(--muted); cursor: default; background: none; }
+.btn.disabled, button.btn:disabled { border-color: var(--border); color: var(--muted); cursor: default; background: none; }
 
 .bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; margin: 8px 0; }
 .bar-fill { height: 100%; background: var(--accent); transition: width .4s; }

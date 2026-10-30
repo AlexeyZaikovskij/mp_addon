@@ -328,6 +328,20 @@ tr.group-row em { color: var(--muted); font-style: normal; font-weight: 400; }
 .ov-legend li:hover, .ov-legend li.active { background: var(--hover); }
 .ov-legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .ov-legend b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.ov-views { margin: 0; gap: 4px; }
+.ov-views button { padding: 2px 8px; font-size: 12px; }
+.ov-tiles { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+.ov-tile-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px; margin-bottom: 4px;
+  border: 0; border-radius: 6px; background: none; color: var(--text-soft); font: inherit; font-size: 13px; cursor: pointer; }
+.ov-tile-head:hover, .ov-tile-group.active .ov-tile-head { background: var(--hover); }
+.ov-tile-head i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.ov-tile-head b { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+.ov-tile-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-tile { max-width: 100%; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--st) 55%, transparent);
+  border-left: 3px solid var(--st); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--st) 14%, transparent);
+  color: var(--text); font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-tile:hover { background: color-mix(in srgb, var(--st) 26%, transparent); }
+.ov-tile.ov-name { font-weight: 500; }
 .ov-list { max-height: 420px; overflow: auto; }
 .ov-item { display: flex; gap: 10px; align-items: flex-start; padding: 7px 2px; border-bottom: 1px solid var(--border); }
 .ov-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }

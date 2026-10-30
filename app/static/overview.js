@@ -59,6 +59,49 @@
       </li>`).join("");
   }
 
+  // The same channels as tiles, grouped by state: which channels are in trouble, not only how many.
+  // A tile opens the channel menu (like the names in the list); a group title filters the list.
+  const VIEW_KEY = "ov_state_view";
+  let view = "ring";
+  try { view = localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "ring"; } catch { /* private window */ }
+
+  function renderView() {
+    for (const b of document.querySelectorAll("#state-view button")) b.classList.toggle("active", b.dataset.view === view);
+    $("#ring-view").hidden = view !== "ring";
+    $("#tiles").hidden = view !== "tiles";
+    if (view === "ring") pie.resize();
+    else renderTiles();
+  }
+
+  function renderTiles() {
+    if (!state) return;
+    const multi = state.servers.length > 1;
+    $("#tiles").innerHTML = STATES.map((s) => {
+      const list = state.channels.filter((c) => c.state === s.key);
+      if (!list.length) return "";
+      return `<div class="ov-tile-group${stateFilter === s.key ? " active" : ""}">
+        <button type="button" class="ov-tile-head" data-state="${s.key}"><i style="background:${s.color}"></i>${escapeHtml(s.label)} <b>${list.length}</b></button>
+        <div class="ov-tile-list">${list.map((c) => {
+          const where = multi ? `${c.server} · ${c.stream}` : c.stream;
+          const tip = [where, ...c.alarms].filter(Boolean).join("\n");
+          return `<button type="button" class="ov-tile ov-name" style="--st:${s.color}" title="${escapeHtml(tip)}"
+            data-server="${c.server_id}" data-node="${c.node_id}" data-id="${c.id}" data-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>`;
+        }).join("")}</div></div>`;
+    }).join("") || `<p class="muted">${escapeHtml(T.no_rows)}</p>`;
+  }
+
+  $("#tiles").addEventListener("click", (e) => {
+    const head = e.target.closest(".ov-tile-head");
+    if (head) setFilter(head.dataset.state);
+  });
+  for (const b of document.querySelectorAll("#state-view button")) {
+    b.addEventListener("click", () => {
+      view = b.dataset.view;
+      try { localStorage.setItem(VIEW_KEY, view); } catch { /* not kept */ }
+      renderView();
+    });
+  }
+
   pie.on("click", (p) => setFilter(p.data.key));
   $("#legend").addEventListener("click", (e) => {
     const li = e.target.closest("li[data-state]");
@@ -69,6 +112,7 @@
   function setFilter(key) {
     stateFilter = stateFilter === key ? null : key;
     renderPie();
+    renderTiles();
     renderNow();
   }
 
@@ -107,6 +151,7 @@
       $("#server-errors").innerHTML = state.errors.map((e) =>
         `<div class="error">${escapeHtml(T.err_server_unavailable.replace("{name}", e.server))}: ${escapeHtml(e.message)}</div>`).join("");
       renderPie();
+      renderView();
       renderNow();
     } catch (err) {
       $("#now-list").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;

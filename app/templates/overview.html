@@ -21,11 +21,18 @@
 <div class="ov-grid">
   <div class="ov-col">
     <section class="card">
-      <h2>{{ t("ov_state_now") }}</h2>
-      <div class="ov-pie-wrap">
+      <div class="section-head">
+        <h2>{{ t("ov_state_now") }}</h2>
+        <span class="presets ov-views" id="state-view">
+          <button type="button" data-view="ring">{{ t("ov_view_ring") }}</button>
+          <button type="button" data-view="tiles">{{ t("ov_view_tiles") }}</button>
+        </span>
+      </div>
+      <div class="ov-pie-wrap" id="ring-view">
         <div id="pie" class="ov-pie"></div>
         <ul class="ov-legend" id="legend"></ul>
       </div>
+      <div class="ov-tiles" id="tiles" hidden></div>
       <p class="muted note">{{ t("ov_state_hint") }}</p>
     </section>
 

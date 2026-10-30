@@ -331,6 +331,8 @@ STRINGS: dict[str, dict[str, str]] = {
     # Templates
     "nav_overview": {"en": "Overview", "ru": "Обзор"},
     "nav_reports": {"en": "Reports", "ru": "Отчёты"},
+    "ov_view_ring": {"en": "Ring", "ru": "Кольцо"},
+    "ov_view_tiles": {"en": "Tiles", "ru": "Плитки"},
     "nav_charts": {"en": "Charts", "ru": "Графики"},
     "ch_hint": {"en": "Your own set of charts from MultiProbe measurements. A chart shows one measure of one or several channels, also of different servers; with one channel the arrows switch to the previous or next one. The set is kept for your account.",
                 "ru": "Ваш собственный набор графиков по измерениям MultiProbe. График показывает одно измерение одного или нескольких каналов, в том числе с разных серверов; при одном канале стрелки переключают на предыдущий или следующий. Набор сохраняется для вашей учётной записи."},
@@ -365,8 +367,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "ov_refresh": {"en": "Refresh", "ru": "Обновить"},
     "ov_state_now": {"en": "Channels right now", "ru": "Состояние каналов сейчас"},
     "ov_state_hint": {
-        "en": "A channel takes the state of the most severe alarm active on it or on its PIDs. Click a sector to list those channels.",
-        "ru": "Канал получает состояние по самому серьёзному активному аларму на нём или его PID. Клик по сектору — список этих каналов.",
+        "en": "A channel takes the state of the most severe alarm active on it or on its PIDs. Click a sector or a group title to list those channels, a tile for the channel menu.",
+        "ru": "Канал получает состояние по самому серьёзному активному аларму на нём или его PID. Клик по сектору или заголовку группы — список этих каналов, по плитке — меню канала.",
     },
     "ov_channels": {"en": "channels", "ru": "каналов"},
     "ov_state_ok": {"en": "No problems", "ru": "Без проблем"},

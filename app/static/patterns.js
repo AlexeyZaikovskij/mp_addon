@@ -168,29 +168,44 @@
   }
   // --- Measurements -----------------------------------------------------------------------------------
   // One measure for every channel that has it: hours regularly off the channel's usual level, and drift.
+  let mpValue = "", mpLabels = new Map();
+  const mpPicker = Picker($("#mp-measure"), {
+    multi: false, texts: { search: T.ch_search_measures, reset: T.ch_reset, noMatch: T.ch_no_match },
+    onChange: (values) => {
+      mpValue = values[0] || "";
+      mpPicker.setSelected(values);
+      mpPicker.setLabel(mpLabels.get(mpValue) || T.ch_pick);
+    },
+  });
+  mpPicker.setLabel(T.loading);
+
   async function loadMeasures() {
-    const sel = $("#mp-measure");
-    sel.innerHTML = `<option value="">${escapeHtml(T.loading)}</option>`;
+    mpPicker.setLabel(T.loading);
     $("#mp-run").disabled = true;
     let groups;
     try {
       groups = await api("/api/patterns/measures");
     } catch (err) {
-      sel.innerHTML = "";
+      mpPicker.setLabel("—");
       $("#mp-status").innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
       return;
     }
     // Groups and measures without values in the last day are greyed (as on the Charts page).
-    sel.innerHTML = `<option value="">${escapeHtml(T.ch_pick)}</option>` + groups.map((g) =>
-      `<optgroup label="${escapeHtml(`${g.name} · ${fmt(T.mp_channels, { n: g.channels })}${g.filled ? "" : ` — ${T.ch_empty_group}`}`)}"${g.filled ? "" : ' class="ch-off"'}>${
-        g.measures.map((m) => `<option value="${g.id}|${escapeHtml(m.column)}"${m.filled ? "" : ' class="ch-off"'}>${escapeHtml(m.name)}${m.unit ? `, ${escapeHtml(m.unit)}` : ""}</option>`).join("")
-      }</optgroup>`).join("");
+    mpLabels = new Map(groups.flatMap((g) => g.measures.map((m) => [`${g.id}|${m.column}`, `${m.name}${m.unit ? `, ${m.unit}` : ""}`])));
+    if (!mpLabels.has(mpValue)) mpValue = "";
+    mpPicker.setGroups(groups.map((g) => ({
+      key: String(g.id), muted: !g.filled,
+      label: `${g.name} · ${fmt(T.mp_channels, { n: g.channels })}${g.filled ? "" : ` — ${T.ch_empty_group}`}`,
+      items: g.measures.map((m) => ({ value: `${g.id}|${m.column}`, label: mpLabels.get(`${g.id}|${m.column}`), muted: !m.filled })),
+    })));
+    mpPicker.setSelected(mpValue ? [mpValue] : []);
+    mpPicker.setLabel(mpLabels.get(mpValue) || T.ch_pick);
     $("#mp-run").disabled = false;
   }
 
   let mpSeq = 0;
   async function runMeasures() {
-    const v = $("#mp-measure").value;
+    const v = mpValue;
     if (!v) { $("#mp-status").textContent = T.mp_pick; return; }
     const seq = ++mpSeq;
     const btn = $("#mp-run");

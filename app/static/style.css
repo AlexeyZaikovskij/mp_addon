@@ -524,23 +524,34 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .ch-step select { flex: 1 1 auto; width: 0; }
 .ch-step .btn.small { font-size: 16px; line-height: 1; padding: 3px 8px; }
 .ch-bar2 { justify-content: space-between; font-size: 12px; }
-.ch-objs { position: relative; }
-.ch-pick-btn { flex: 1 1 auto; width: 0; text-align: left; padding: 4px 22px 4px 8px; font: inherit; font-size: 13px;
+.ch-step .pk { flex: 1 1 auto; width: 0; }
+/* Picker (picker.js): a drop-down list with search, Reset and folding groups. */
+.pk { position: relative; display: flex; min-width: 0; }
+.pk-btn { flex: 1 1 auto; width: 100%; min-width: 0; text-align: left; padding: 4px 22px 4px 8px; font: inherit; font-size: 13px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--text); cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
-.ch-pick-btn::after { content: "▾"; position: absolute; right: 7px; color: var(--muted); }
-.ch-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 260px;
+.pk-btn::after { content: "▾"; position: absolute; right: 7px; color: var(--muted); }
+.pk-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 280px;
   background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
-.ch-pop-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.ch-pop .ch-search { flex: 1 1 auto; min-width: 0; box-sizing: border-box; }
-.ch-list { max-height: 300px; overflow-y: auto; }
-.ch-item { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+.pk-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.pk-search { flex: 1 1 auto; min-width: 0; box-sizing: border-box; }
+.pk-list { max-height: 340px; overflow-y: auto; }
+.pk-group { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 6px; margin-top: 2px; border: 0;
+  border-radius: 4px; background: none; color: var(--text-soft); font: inherit; font-size: 12px; font-weight: 600;
+  text-align: left; cursor: pointer; }
+.pk-group:hover { background: var(--hover); }
+.pk-group.muted { color: var(--muted); font-weight: 500; }
+.pk-arrow { width: 10px; flex: none; color: var(--muted); }
+.pk-glabel { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-count { flex: none; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.pk-item { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px 4px 22px; border-radius: 4px; cursor: pointer;
   font-size: 13px; color: var(--text); }
-.ch-item:hover { background: var(--hover); }
-.ch-item.muted { color: var(--muted); }
-.ch-mes option, .ch-mes optgroup { color: var(--text); }
-.ch-bar select.ch-mes.ch-off, .ch-mes optgroup.ch-off, .ch-mes option.ch-off { color: var(--muted); }
+.pk-item:hover { background: var(--hover); }
+.pk-item.muted { color: var(--muted); }
+.pk-item input { margin-top: 2px; }
+.pk-list > .pk-item:first-child, .pk-flat { padding-left: 6px; }
+.pk-empty { margin: 6px; }
 .ch-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .ch-chips:empty { display: none; }
 .ch-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 4px 2px 8px;
@@ -581,8 +592,8 @@ span.bad { color: var(--error-text); font-weight: 500; }
 /* Lower or higher is good or bad depending on the measure (bitrate vs latency): arrows, no colours. */
 .mp-down::before { content: "↓ "; color: var(--muted); }
 .mp-up::before { content: "↑ "; color: var(--muted); }
-#mp-measure { min-width: 280px; }
-#mp-measure optgroup.ch-off, #mp-measure option.ch-off { color: var(--muted); }
+#mp-measure { width: 340px; max-width: 100%; margin-top: 4px; }
+.pt-field { color: var(--muted); font-size: 13px; }
 .pt-flap { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pt-flap td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
 .pt-flap td:first-child { width: 14px; padding-top: 9px; }

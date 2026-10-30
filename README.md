@@ -36,7 +36,8 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/mp_client.py` | MultiProbe API client |
 | `app/storage.py` | Report templates (SQLite in `data/addon.db`, set `DATA_DIR` to move it) |
 | `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
-| `app/charts.py` | Charts page: each user's own board of charts (one measure of up to 8 channels, also of different servers; period, size) |
+| `app/charts.py` | Charts page: each user's own board of charts (several measures of several channels, also of different servers, up to 8 lines and 2 units; period, size) |
+| `app/static/picker.js` | Drop-down list with search, Reset and folding groups (channels by stream, measures by analyzer) |
 | `app/patterns.py` | Patterns page: alarms recurring at the same time of day / week, flapping alarms, weekday × hour heatmap, rule-based advice |
 | `app/measure_patterns.py` | Patterns page, measurements: hours regularly off a channel's usual level, drift over the period, drift shared by many channels |
 | `app/recordings.py` | Recordings: timeline, HLS preview through the Toolkit, MP4/MP3 export (PyAV) |

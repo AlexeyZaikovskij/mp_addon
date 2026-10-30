@@ -34,7 +34,7 @@
   <h2>{{ t("mp_title") }}</h2>
   <p class="muted note">{{ t("mp_hint") }}</p>
   <div class="rec-pick pt-pick">
-    <label>{{ t("ch_measure") }}<br><select id="mp-measure"><option value="">{{ t("loading") }}</option></select></label>
+    <div class="pt-field">{{ t("ch_measure") }}<br><span id="mp-measure"></span></div>
     <button type="button" class="primary" id="mp-run" disabled>{{ t("pt_run") }}</button>
   </div>
   <div id="mp-status" class="muted"></div>
@@ -70,5 +70,6 @@
 {% block scripts %}
 <script>window.I18N = {{ strings | tojson }}; window.HAS_SERVERS = {{ "true" if session.conns else "false" }};</script>
 <script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/picker.js?v={{ static_version() }}"></script>
 <script src="/static/patterns.js?v={{ static_version() }}"></script>
 {% endblock %}

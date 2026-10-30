@@ -5,7 +5,7 @@
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   // The same palette as the report charts (measures.js); one colour per channel of a chart.
   const PALETTE = ["#50b3d0", "#f08a5d", "#3fc28a", "#f2b632", "#e889b4", "#7bd36b", "#9b8cf2", "#ff6b6b"];
-  const MAX_OBJECTS = PALETTE.length;
+  const MAX_OBJECTS = PALETTE.length;  // as charts.MAX_OBJECTS
   const INK = css("--text"), MUTED = css("--muted"), GRID = css("--grid-line");
   const PERIODS = [1, 6, 24, 168];
   const SIZES = ["s", "m", "l"];
@@ -58,9 +58,12 @@
   };
 
   // --- Board ----------------------------------------------------------------------------------------------
-  // A chart's cfg: the source (server, node) whose channels its picker lists, the picked channels
-  // (objects: [{server_id, node_id, id}], they may come from several sources), the measure, period and size.
-  let panels = [];   // [{cfg, el, chart, seq, objects (of the source), known (every loaded channel), measures}]
+  // A chart's cfg: the source (server, node) whose channels its list shows, the picked channels
+  // (objects: [{server_id, node_id, id}], they may come from several sources), the picked measures
+  // (measures: [{analyzer_id, column}]), period and size. Lines = channels x measures, at most MAX_LINES.
+  const MAX_LINES = PALETTE.length;
+  const MAX_UNITS = 2;  // one axis on the left, one on the right
+  let panels = [];   // [{cfg, el, chart, seq, objects (of the source), known (every loaded channel), measures, filled, pkObj, pkMes}]
   let saveTimer = null;
 
   function save() {
@@ -80,29 +83,24 @@
   }
 
   const newId = () => Math.random().toString(36).slice(2, 10);
+  const pickerTexts = { search: T.ch_search, reset: T.ch_reset, resetHint: T.ch_reset_hint, noMatch: T.ch_no_match };
 
   function addPanel(cfg, scroll) {
     cfg.objects = cfg.objects || [];
-    const p = { cfg, el: document.createElement("section"), chart: null, seq: 0, objects: [], known: new Map(), measures: [] };
+    cfg.measures = cfg.measures || [];
+    const p = { cfg, el: document.createElement("section"), chart: null, seq: 0, objects: [], known: new Map(), measures: [], filled: null };
     p.el.className = "card ch-panel";
     p.el.innerHTML = `
       <div class="ch-bar">
         <select class="ch-src" title="${escapeHtml(T.ch_source)}"></select>
-        <span class="ch-step ch-objs">
+        <span class="ch-step">
           <button type="button" class="btn small" data-step="obj" data-dir="-1" title="${escapeHtml(T.ch_prev)}">‹</button>
-          <button type="button" class="ch-pick-btn" title="${escapeHtml(T.ch_channel)}"></button>
+          <span class="ch-objs"></span>
           <button type="button" class="btn small" data-step="obj" data-dir="1" title="${escapeHtml(T.ch_next)}">›</button>
-          <div class="ch-pop" hidden>
-            <div class="ch-pop-head">
-              <input type="search" class="ch-search" placeholder="${escapeHtml(T.ch_search)}">
-              <button type="button" class="btn small ch-reset" title="${escapeHtml(T.ch_reset_hint)}">${escapeHtml(T.ch_reset)}</button>
-            </div>
-            <div class="ch-list"></div>
-          </div>
         </span>
         <span class="ch-step">
           <button type="button" class="btn small" data-step="mes" data-dir="-1" title="${escapeHtml(T.ch_prev)}">‹</button>
-          <select class="ch-mes" title="${escapeHtml(T.ch_measure)}"></select>
+          <span class="ch-mes"></span>
           <button type="button" class="btn small" data-step="mes" data-dir="1" title="${escapeHtml(T.ch_next)}">›</button>
         </span>
       </div>
@@ -118,6 +116,9 @@
         </span>
       </div>
       <div class="ch-chart"></div>`;
+    p.pkObj = Picker(p.el.querySelector(".ch-objs"), { multi: true, texts: pickerTexts, onChange: (v) => pickObjects(p, v) });
+    p.pkMes = Picker(p.el.querySelector(".ch-mes"), { multi: true, texts: { ...pickerTexts, search: T.ch_search_measures,
+      resetHint: T.ch_reset_measures }, onChange: (v) => pickMeasures(p, v) });
     $("#board").append(p.el);
     panels.push(p);
     wire(p);
@@ -144,9 +145,10 @@
   }
 
   const objLabel = (o) => o.stream ? `${o.stream} › ${o.name}` : o.name;
-  const hasMeasure = (o, cfg) => !cfg.analyzer_id || o.analyzers.includes(cfg.analyzer_id);
+  // A channel "has" the chart's measures when it has the analyzer of at least one of them.
+  const hasMeasure = (o, cfg) => !cfg.measures.length || cfg.measures.some((m) => o.analyzers.includes(m.analyzer_id));
   const keyOf = (sid, oid) => `${sid}:${oid}`;
-  const isPicked = (p, o) => p.cfg.objects.some((x) => x.server_id === p.cfg.server_id && x.id === o.id);
+  const mesKey = (m) => `${m.analyzer_id}|${m.column}`;
 
   // A picked channel's label; the server is named when the chart mixes servers.
   function pickedLabel(p, x) {
@@ -163,7 +165,7 @@
     if (p.cfg.server_id != null && p.cfg.node_id != null) sources.set(`${p.cfg.server_id}:${p.cfg.node_id}`, p.cfg);
     for (const x of p.cfg.objects) sources.set(`${x.server_id}:${x.node_id}`, x);
     p.objects = [];
-    renderPicker(p, T.loading);
+    p.pkObj.setLabel(T.loading);
     let failed = "";
     await Promise.all([...sources.values()].map(async (src) => {
       try {
@@ -177,32 +179,45 @@
         failed = err.message;
       }
     }));
-    renderPicker(p);
+    renderObjects(p);
     renderChips(p);
     if (failed) showText(p, failed, true);
     await loadMeasures(p);
   }
 
-  function renderPicker(p, text) {
+  // The source's channels grouped by stream: the stream itself first, then what is inside it.
+  function renderObjects(p) {
     const n = p.cfg.objects.length;
-    p.el.querySelector(".ch-pick-btn").textContent = text || (n === 0 ? T.ch_pick : n === 1 ? pickedLabel(p, p.cfg.objects[0])
-      : T.ch_n_channels.replace("{n}", n));
+    p.pkObj.setLabel(n === 0 ? T.ch_pick : n === 1 ? pickedLabel(p, p.cfg.objects[0]) : T.ch_n_channels.replace("{n}", n));
     for (const b of p.el.querySelectorAll('[data-step="obj"]')) b.disabled = n > 1;
-    p.el.querySelector(".ch-reset").disabled = n === 0;
-    const q = p.el.querySelector(".ch-search").value.trim().toLowerCase();
-    p.el.querySelector(".ch-list").innerHTML = p.objects.filter((o) => !q || objLabel(o).toLowerCase().includes(q)).map((o) =>
-      `<label class="ch-item${hasMeasure(o, p.cfg) ? "" : " muted"}"><input type="checkbox" value="${escapeHtml(o.id)}"${isPicked(p, o) ? " checked" : ""}>
-        <span>${escapeHtml(objLabel(o))}</span></label>`).join("") || `<p class="muted">${escapeHtml(T.ch_no_match)}</p>`;
+    const groups = new Map();
+    for (const o of p.objects) {
+      const g = o.stream || o.name;
+      if (!groups.has(g)) groups.set(g, { key: g, label: g, items: [] });
+      groups.get(g).items.push({ value: o.id, label: o.stream ? o.name : `${o.name} (${o.kind || T.ch_stream})`,
+        muted: !hasMeasure(o, p.cfg), title: objLabel(o) });
+    }
+    // A stream with nothing inside it (an HLS channel) is not a group of one: such streams go first, unfolded.
+    const lone = [...groups.values()].filter((g) => g.items.length === 1);
+    const list = [...(lone.length ? [{ key: "", label: null, items: lone.map((g) => ({ ...g.items[0], label: g.label })) }] : []),
+      ...[...groups.values()].filter((g) => g.items.length > 1)];
+    p.pkObj.setGroups(list);
+    p.pkObj.setSelected(p.cfg.objects.filter((x) => x.server_id === p.cfg.server_id).map((x) => x.id));
   }
 
-  // With several channels the chips are the legend: the colour of each line, and ✕ to take it off.
+  // With several channels and one measure the channel chips are the legend (with the line colours); with one
+  // channel and several measures the measure chips are. ✕ takes a channel or a measure off the chart.
   function renderChips(p) {
-    p.el.querySelector(".ch-chips").innerHTML = p.cfg.objects.length < 2 ? "" : p.cfg.objects.map((x, i) =>
-      `<span class="ch-chip" data-i="${i}"><i style="background:${PALETTE[i % PALETTE.length]}"></i>${escapeHtml(pickedLabel(p, x))}
-        <button type="button" class="link" data-unpick="${i}" title="${escapeHtml(T.ch_remove_channel)}">✕</button></span>`).join("");
+    const objs = p.cfg.objects, mes = p.cfg.measures;
+    const objColour = mes.length <= 1, mesColour = objs.length <= 1;
+    const chip = (kind, i, label, colour) => `<span class="ch-chip" data-kind="${kind}" data-i="${i}">${colour ? `<i style="background:${PALETTE[i % PALETTE.length]}"></i>` : ""}${escapeHtml(label)}
+      <button type="button" class="link" data-unpick="${kind}:${i}" title="${escapeHtml(T.ch_remove_channel)}">✕</button></span>`;
+    p.el.querySelector(".ch-chips").innerHTML =
+      (objs.length > 1 ? objs.map((x, i) => chip("obj", i, pickedLabel(p, x), objColour)).join("") : "") +
+      (mes.length > 1 ? mes.map((m, i) => chip("mes", i, measureName(p, m), mesColour)).join("") : "");
   }
 
-  // Measures of every analyzer the picked channels have (a channel without the measure has no line).
+  // Measures of every analyzer the picked channels have (a channel without a measure has no line for it).
   async function loadMeasures(p) {
     const analyzers = new Set();
     for (const x of p.cfg.objects) for (const a of p.known.get(keyOf(x.server_id, x.id))?.analyzers || []) analyzers.add(a);
@@ -244,21 +259,24 @@
   const measureFilled = (p, a, m) => !p.filled || !(a.id in p.filled) || p.filled[a.id].includes(m.column);
   const orderedGroups = (p) => [...p.measures.filter((a) => groupFilled(p, a)), ...p.measures.filter((a) => !groupFilled(p, a))];
   const flatMeasures = (p) => orderedGroups(p).flatMap((a) => a.measures.map((m) => ({ ...m, aid: a.id, analyzer: a.name })));
+  const measureInfo = (p, m) => flatMeasures(p).find((x) => x.aid === m.analyzer_id && x.column === m.column);
+  const measureName = (p, m) => measureInfo(p, m)?.name || m.column;
 
   function renderMeasures(p) {
-    const sel = p.el.querySelector(".ch-mes");
-    const cur = `${p.cfg.analyzer_id}|${p.cfg.column}`;
-    if (!flatMeasures(p).some((m) => `${m.aid}|${m.column}` === cur)) { p.cfg.analyzer_id = null; p.cfg.column = null; }
-    sel.innerHTML = `<option value="">${escapeHtml(T.ch_pick)}</option>` + orderedGroups(p).map((a) => {
+    const known = new Set(flatMeasures(p).map((m) => `${m.aid}|${m.column}`));
+    if (p.measures.length) p.cfg.measures = p.cfg.measures.filter((m) => known.has(mesKey(m)));
+    else if (!p.cfg.objects.length) p.cfg.measures = [];
+    const n = p.cfg.measures.length;
+    p.pkMes.setLabel(n === 0 ? T.ch_pick : n === 1 ? measureName(p, p.cfg.measures[0]) : T.ch_n_measures.replace("{n}", n));
+    for (const b of p.el.querySelectorAll('[data-step="mes"]')) b.disabled = n > 1;
+    p.pkMes.setGroups(orderedGroups(p).map((a) => {
       const empty = !groupFilled(p, a);
-      return `<optgroup label="${escapeHtml(empty ? `${a.name} — ${T.ch_empty_group}` : a.name)}"${empty ? ' class="ch-off"' : ""}>${a.measures.map((m) => {
-        const v = `${a.id}|${m.column}`;
-        return `<option value="${escapeHtml(v)}"${v === cur ? " selected" : ""}${measureFilled(p, a, m) ? "" : ' class="ch-off"'}>${escapeHtml(m.name)}${m.unit ? `, ${escapeHtml(m.unit)}` : ""}</option>`;
-      }).join("")}</optgroup>`;
-    }).join("");
-    // The closed list shows an empty pick greyed too.
-    const picked = p.measures.find((a) => a.id === p.cfg.analyzer_id);
-    sel.classList.toggle("ch-off", !!picked && !measureFilled(p, picked, { column: p.cfg.column }));
+      return { key: String(a.id), label: empty ? `${a.name} — ${T.ch_empty_group}` : a.name, muted: empty,
+        items: a.measures.map((m) => ({ value: `${a.id}|${m.column}`, label: `${m.name}${m.unit ? `, ${m.unit}` : ""}`,
+          muted: !measureFilled(p, a, m) })) };
+    }));
+    p.pkMes.setSelected(p.cfg.measures.map(mesKey));
+    renderChips(p);
   }
 
   function wire(p) {
@@ -271,33 +289,23 @@
       save();
       await loadObjects(p);
     });
-    const pop = p.el.querySelector(".ch-pop");
-    p.el.querySelector(".ch-pick-btn").addEventListener("click", () => {
-      pop.hidden = !pop.hidden;
-      if (!pop.hidden) { renderPicker(p); p.el.querySelector(".ch-search").focus(); }
-    });
-    document.addEventListener("click", (e) => { if (!pop.hidden && !p.el.querySelector(".ch-objs").contains(e.target)) pop.hidden = true; });
-    p.el.querySelector(".ch-search").addEventListener("input", () => renderPicker(p));
-    p.el.querySelector(".ch-reset").addEventListener("click", () => {
-      p.el.querySelector(".ch-search").value = "";
-      setObjects(p, []);
-    });
-    p.el.querySelector(".ch-list").addEventListener("change", (e) => {
-      if (e.target.type === "checkbox") toggleObject(p, e.target.value, e.target.checked);
-    });
     const chips = p.el.querySelector(".ch-chips");
     chips.addEventListener("click", (e) => {
       const b = e.target.closest("[data-unpick]");
-      if (b) setObjects(p, p.cfg.objects.filter((_, i) => i !== Number(b.dataset.unpick)));
+      if (!b) return;
+      const [kind, i] = b.dataset.unpick.split(":");
+      if (kind === "obj") setObjects(p, p.cfg.objects.filter((_, j) => j !== Number(i)));
+      else setMeasures(p, p.cfg.measures.filter((_, j) => j !== Number(i)));
     });
-    // A chip points at its line on the chart.
+    // A chip points at its lines on the chart.
     for (const [ev, type] of [["mouseover", "highlight"], ["mouseout", "downplay"]]) {
       chips.addEventListener(ev, (e) => {
         const chip = e.target.closest(".ch-chip");
-        if (chip && p.chart) p.chart.dispatchAction({ type, seriesId: `s${chip.dataset.i}` });
+        if (!chip || !p.chart) return;
+        const ids = (p.lines || []).filter((l) => (chip.dataset.kind === "obj" ? l.oi : l.mi) === Number(chip.dataset.i)).map((l) => l.id);
+        if (ids.length) p.chart.dispatchAction({ type, seriesId: ids });
       });
     }
-    p.el.querySelector(".ch-mes").addEventListener("change", (e) => pickMeasure(p, e.target.value));
     for (const b of p.el.querySelectorAll("[data-step]")) {
       b.addEventListener("click", () => (b.dataset.step === "obj" ? stepObject : stepMeasure)(p, Number(b.dataset.dir)));
     }
@@ -313,21 +321,48 @@
     new ResizeObserver(() => p.chart && p.chart.resize()).observe(p.el.querySelector(".ch-chart"));
   }
 
-  function toggleObject(p, id, on) {
-    const rest = p.cfg.objects.filter((x) => x.server_id !== p.cfg.server_id || x.id !== id);
-    if (on && rest.length >= MAX_OBJECTS) {
-      renderPicker(p);
-      return flash(p, T.ch_too_many.replace("{n}", MAX_OBJECTS));
+  // The channel list shows the current source: its ticks replace the picked channels of that source,
+  // those of other sources stay.
+  function pickObjects(p, ids) {
+    const others = p.cfg.objects.filter((x) => x.server_id !== p.cfg.server_id || x.node_id !== p.cfg.node_id);
+    const mine = ids.map((id) => p.cfg.objects.find((x) => x.server_id === p.cfg.server_id && x.id === id)
+      || { server_id: p.cfg.server_id, node_id: p.cfg.node_id, id });
+    const next = ids.length ? [...others, ...mine] : [];  // Reset takes every channel off
+    if (next.length > MAX_OBJECTS || next.length * Math.max(1, p.cfg.measures.length) > MAX_LINES) {
+      renderObjects(p);
+      return flash(p, T.ch_too_many_lines.replace("{n}", MAX_LINES));
     }
-    setObjects(p, on ? [...rest, { server_id: p.cfg.server_id, node_id: p.cfg.node_id, id }] : rest);
+    setObjects(p, next);
+  }
+
+  function pickMeasures(p, keys) {
+    const next = keys.map((k) => ({ analyzer_id: Number(k.split("|")[0]), column: k.slice(k.indexOf("|") + 1) }));
+    if (next.length * Math.max(1, p.cfg.objects.length) > MAX_LINES) {
+      renderMeasures(p);
+      return flash(p, T.ch_too_many_lines.replace("{n}", MAX_LINES));
+    }
+    const rawUnits = new Set(next.map((m) => (measureInfo(p, m)?.unit || "").toLowerCase()));
+    if (rawUnits.size > MAX_UNITS) {
+      renderMeasures(p);
+      return flash(p, T.ch_too_many_units.replace("{n}", MAX_UNITS));
+    }
+    setMeasures(p, next);
   }
 
   async function setObjects(p, list) {
     p.cfg.objects = list;
-    renderPicker(p);
+    renderObjects(p);
     renderChips(p);
     save();
     await loadMeasures(p);
+    save();
+    loadData(p);
+  }
+
+  function setMeasures(p, list) {
+    p.cfg.measures = list;
+    renderMeasures(p);
+    renderObjects(p);
     save();
     loadData(p);
   }
@@ -339,30 +374,22 @@
     setTimeout(() => info.classList.remove("error"), 3000);
   }
 
-  function pickMeasure(p, value) {
-    const [aid, column] = value ? [Number(value.split("|")[0]), value.slice(value.indexOf("|") + 1)] : [null, null];
-    Object.assign(p.cfg, { analyzer_id: aid, column });
-    renderMeasures(p);
-    renderPicker(p);
-    save();
-    loadData(p);
-  }
-
-  // With one channel picked, the arrows step to the next channel of the source that has the chart's measure.
+  // With one channel picked, the arrows step to the next channel of the source that has the chart's measures.
   function stepObject(p, dir) {
     const list = p.objects.filter((o) => hasMeasure(o, p.cfg));
     if (!list.length || p.cfg.objects.length > 1) return;
-    let i = list.findIndex((o) => isPicked(p, o));
+    let i = list.findIndex((o) => p.cfg.objects.some((x) => x.server_id === p.cfg.server_id && x.id === o.id));
     if (i < 0) i = dir > 0 ? -1 : list.length;
     setObjects(p, [{ server_id: p.cfg.server_id, node_id: p.cfg.node_id, id: list[(i + dir + list.length) % list.length].id }]);
   }
 
   function stepMeasure(p, dir) {
     const list = flatMeasures(p);
-    if (!list.length) return;
-    const i = list.findIndex((m) => m.aid === p.cfg.analyzer_id && m.column === p.cfg.column);
+    if (!list.length || p.cfg.measures.length > 1) return;
+    const cur = p.cfg.measures[0];
+    const i = cur ? list.findIndex((m) => m.aid === cur.analyzer_id && m.column === cur.column) : -1;
     const next = list[(i + dir + list.length) % list.length] || list[0];
-    pickMeasure(p, `${next.aid}|${next.column}`);
+    setMeasures(p, [{ analyzer_id: next.aid, column: next.column }]);
   }
 
   function move(p, dir) {
@@ -390,40 +417,59 @@
   async function loadData(p) {
     const c = p.cfg;
     const info = p.el.querySelector(".ch-info");
-    if (!c.objects.length || !c.analyzer_id || !c.column) {
+    if (!c.objects.length || !c.measures.length) {
       info.textContent = "";
       return showText(p, T.ch_pick_hint);
     }
     const seq = ++p.seq;
     let data;
     try {
-      data = await api("/api/charts/data", { objects: c.objects, analyzer_id: c.analyzer_id, column: c.column, hours: c.hours });
+      data = await api("/api/charts/data", { objects: c.objects, measures: c.measures, hours: c.hours });
     } catch (err) {
       if (seq === p.seq) showText(p, err.message, true);
       return;
     }
     if (seq !== p.seq) return;
-    const vals = (key) => data.series.flatMap((s) => (data.raw ? s.avg : s[key]).map((x) => x[1])).filter((v) => v !== null);
-    const mins = vals("min"), maxs = vals("max");
+    const vals = (s, key) => (data.raw ? s.avg : s[key]).map((x) => x[1]).filter((v) => v !== null);
+    const any = data.series.some((s) => s.avg.some((x) => x[1] !== null));
     const error = data.series.find((s) => s.error)?.error;
-    info.textContent = error || (maxs.length ? T.ch_minmax.replace("{a}", `${fmtValue(Math.min(...mins))} ${data.unit}`)
-      .replace("{b}", `${fmtValue(Math.max(...maxs))} ${data.unit}`) : "");
-    // A channel without values (no such measure, or nothing recorded) keeps its chip, greyed.
-    data.series.forEach((s, i) => {
-      const chip = p.el.querySelector(`.ch-chip[data-i="${i}"]`);
-      const empty = !s.avg.some((x) => x[1] !== null);
-      if (chip) { chip.classList.toggle("ch-chip-empty", empty); chip.title = empty ? s.error || T.ch_no_data : ""; }
-    });
-    if (!maxs.length) return showText(p, T.ch_no_data);
+    // Min / max over the whole chart only when it has one unit; with two they mean nothing together.
+    if (data.units.length === 1 && any) {
+      const mins = data.series.flatMap((s) => vals(s, "min")), maxs = data.series.flatMap((s) => vals(s, "max"));
+      info.textContent = error || T.ch_minmax.replace("{a}", `${fmtValue(Math.min(...mins))} ${data.units[0]}`)
+        .replace("{b}", `${fmtValue(Math.max(...maxs))} ${data.units[0]}`);
+    } else {
+      info.textContent = error || "";
+    }
+    // A channel or measure without values (no such measure, or nothing recorded) keeps its chip, greyed.
+    for (const chip of p.el.querySelectorAll(".ch-chip")) {
+      const i = Number(chip.dataset.i);
+      const own = data.series.filter((s) => (chip.dataset.kind === "obj"
+        ? s.server_id === c.objects[i]?.server_id && s.object_id === c.objects[i]?.id : s.measure === i));
+      const empty = !own.some((s) => s.avg.some((x) => x[1] !== null));
+      chip.classList.toggle("ch-chip-empty", empty);
+      chip.title = empty ? own.find((s) => s.error)?.error || T.ch_no_data : "";
+    }
+    if (!any) return showText(p, T.ch_no_data);
     const box = p.el.querySelector(".ch-chart");
     if (!p.chart) { box.innerHTML = ""; p.chart = echarts.init(box, null, { renderer: "canvas" }); }
     p.chart.setOption(option(p, data), true);
   }
 
   function option(p, data) {
-    const mes = flatMeasures(p).find((m) => m.aid === p.cfg.analyzer_id && m.column === p.cfg.column);
-    const name = mes ? mes.name : p.cfg.column;
-    const single = data.series.length === 1;
+    const c = p.cfg;
+    const nObj = c.objects.length, nMes = c.measures.length;
+    // One line per channel and measure. Its colour follows what varies: the channel, the measure, or both.
+    p.lines = data.series.map((s, i) => {
+      const oi = c.objects.findIndex((x) => x.server_id === s.server_id && x.id === s.object_id);
+      const mi = s.measure;
+      const name = nMes === 1 ? pickedLabel(p, c.objects[oi] || { server_id: s.server_id, id: s.object_id })
+        : nObj === 1 ? measureName(p, c.measures[mi])
+          : `${pickedLabel(p, c.objects[oi] || { server_id: s.server_id, id: s.object_id })} · ${measureName(p, c.measures[mi])}`;
+      const colour = PALETTE[(nMes === 1 ? oi : nObj === 1 ? mi : i) % PALETTE.length];
+      return { id: `s${i}`, oi, mi, s, name, colour, axis: data.units.indexOf(s.unit) };
+    });
+    const single = p.lines.length === 1;
     const band = single && !data.raw;  // the min–max band only behind a single line: it would hide the others
     const s0 = data.series[0];
     const series = band ? [
@@ -433,24 +479,37 @@
         data: s0.max.map(([t, v], i) => [t, v === null || s0.min[i][1] === null ? null : v - s0.min[i][1]]),
         areaStyle: { color: PALETTE[0], opacity: 0.14 } },
     ] : [];
-    data.series.forEach((s, i) => series.push({
-      id: `s${i}`, name: single ? name : pickedLabel(p, { server_id: s.server_id, id: s.object_id }),
-      type: "line", data: s.avg, showSymbol: false, lineStyle: { width: 1.6 }, color: PALETTE[i % PALETTE.length],
-      connectNulls: false, emphasis: { focus: "series" },
+    for (const l of p.lines) {
+      series.push({ id: l.id, name: l.name, type: "line", data: l.s.avg, yAxisIndex: l.axis, showSymbol: false,
+        lineStyle: { width: 1.6, type: l.axis === 1 ? "dashed" : "solid" }, color: l.colour, connectNulls: false,
+        emphasis: { focus: "series" } });
+    }
+    const both = nObj > 1 && nMes > 1;  // the chips cannot carry the colours then: the chart shows a legend
+    const yAxis = data.units.map((u, i) => ({
+      type: "value", scale: true, name: u, position: i ? "right" : "left",
+      nameTextStyle: { color: MUTED, align: i ? "left" : "right" },
+      axisLabel: { color: MUTED, formatter: fmtValue },
+      splitLine: { show: i === 0, lineStyle: { color: GRID, type: "dashed" } },
     }));
     return {
       useUTC: true, animation: false,
       textStyle: { fontFamily: "Roboto, Segoe UI, system-ui, sans-serif", color: INK },
-      grid: { left: 52, right: 14, top: 26, bottom: 26 },
+      legend: both ? { type: "scroll", top: 0, left: 0, right: 0, icon: "roundRect", itemWidth: 12, itemHeight: 4,
+        textStyle: { color: INK, fontSize: 11 }, data: p.lines.map((l) => l.name) } : { show: false },
+      grid: { left: 52, right: data.units.length > 1 ? 52 : 14, top: both ? 46 : 26, bottom: 26 },
       tooltip: {
         trigger: "axis", axisPointer: { type: "line", lineStyle: { color: MUTED } }, confine: true,
         backgroundColor: css("--raised"), borderColor: css("--border"), borderWidth: 1, textStyle: { color: INK, fontSize: 12 },
         formatter: (params) => {
           const main = params.filter((x) => /^s\d+$/.test(String(x.seriesId)));
           if (!main.length) return "";
-          const lines = [`<b>${fmtTime(main[0].value[0])}</b>`,
-            escapeHtml(single ? pickedLabel(p, { server_id: s0.server_id, id: s0.object_id }) : name)];
-          for (const x of main) lines.push(`${x.marker}${escapeHtml(x.seriesName)}: <b>${fmtValue(x.value[1])}</b> ${escapeHtml(data.unit)}`);
+          const lines = [`<b>${fmtTime(main[0].value[0])}</b>`];
+          if (nObj === 1) lines.push(escapeHtml(pickedLabel(p, c.objects[0])));
+          else if (nMes === 1) lines.push(escapeHtml(measureName(p, c.measures[0])));
+          for (const x of main) {
+            const l = p.lines.find((y) => y.id === x.seriesId);
+            lines.push(`${x.marker}${escapeHtml(x.seriesName)}: <b>${fmtValue(x.value[1])}</b> ${escapeHtml(l?.s.unit || "")}`);
+          }
           if (band) {
             lines.push(`<span style="opacity:.75">${escapeHtml(T.ch_minmax.replace("{a}", fmtValue(s0.min[main[0].dataIndex][1]))
               .replace("{b}", fmtValue(s0.max[main[0].dataIndex][1])))}</span>`);
@@ -463,14 +522,11 @@
         axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false },
         axisLabel: { color: MUTED, hideOverlap: true, formatter: (v) => {
           const d = new Date(v);
-          return p.cfg.hours > 24 ? `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}` : `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+          return c.hours > 24 ? `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}` : `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
         } },
         splitLine: { show: true, lineStyle: { color: GRID } },
       },
-      yAxis: {
-        type: "value", scale: true, name: data.unit, nameTextStyle: { color: MUTED, align: "right" },
-        axisLabel: { color: MUTED, formatter: fmtValue }, splitLine: { lineStyle: { color: GRID, type: "dashed" } },
-      },
+      yAxis,
       dataZoom: [{ type: "inside", filterMode: "none" }],
       series,
     };
@@ -492,7 +548,7 @@
     const scoped = nodes.find((n) => n.server_id === scope) || nodes[0];
     const src = last && last.server_id != null ? { server_id: last.server_id, node_id: last.node_id }
       : scoped ? { server_id: scoped.server_id, node_id: scoped.id } : { server_id: null, node_id: null };
-    addPanel({ id: newId(), ...src, objects: [], analyzer_id: null, column: null, hours: 24,
+    addPanel({ id: newId(), ...src, objects: [], measures: [], hours: 24,
       size: panels.length >= 2 ? "s" : "m" }, true);
     save();
   }

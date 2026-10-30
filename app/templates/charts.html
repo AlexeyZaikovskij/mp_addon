@@ -26,5 +26,6 @@
 {% block scripts %}
 <script>window.I18N = {{ strings | tojson }};</script>
 <script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/picker.js?v={{ static_version() }}"></script>
 <script src="/static/charts.js?v={{ static_version() }}"></script>
 {% endblock %}

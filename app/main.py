@@ -651,13 +651,17 @@ class ChartObject(BaseModel):
     id: str = Field(max_length=80)
 
 
+class ChartMeasure(BaseModel):
+    analyzer_id: int
+    column: str = Field(max_length=120)
+
+
 class ChartPanel(BaseModel):
     id: str = Field(max_length=40)
     server_id: int | None = None  # the source whose channel list the chart shows
     node_id: int | None = None
     objects: list[ChartObject] = Field(default_factory=list, max_length=charts.MAX_OBJECTS)
-    analyzer_id: int | None = None
-    column: str | None = Field(None, max_length=120)
+    measures: list["ChartMeasure"] = Field(default_factory=list, max_length=charts.MAX_MEASURES)
     hours: int = 24
     size: Literal["s", "m", "l"] = "m"
 
@@ -712,8 +716,7 @@ async def api_charts_filled(body: ChartFilledIn, session: sessions.Session = Dep
 
 class ChartDataIn(BaseModel):
     objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
-    analyzer_id: int
-    column: str = Field(max_length=120)
+    measures: list[ChartMeasure] = Field(min_length=1, max_length=charts.MAX_MEASURES)
     hours: int = 24
 
 
@@ -723,7 +726,7 @@ async def api_charts_data(body: ChartDataIn, session: sessions.Session = Depends
         raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
     conns = {o.server_id: session.conn(o.server_id) for o in body.objects}
     return await charts.series(conns, [{"server_id": o.server_id, "object_id": o.id} for o in body.objects],
-                               body.analyzer_id, body.column, body.hours, _user_tz(session))
+                               [m.model_dump() for m in body.measures], body.hours, _user_tz(session))
 
 
 @app.get("/api/overview/top")

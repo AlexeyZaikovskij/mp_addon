@@ -5,6 +5,7 @@ from MultiProbe, aggregated on its side as in the measurement report (reports/me
 """
 import asyncio
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,7 @@ PERIODS = (1, 6, 24, 168)  # hours a chart can show
 MAX_OBJECTS = 8  # channels on one chart
 MAX_MEASURES = 8  # measures on one chart (lines = channels x measures, also at most 8)
 RAW_UP_TO = 1  # hours: such short periods are shown point by point, longer ones in buckets
+MAX_RANGE_DAYS = 31  # an exact from-to period of a chart is at most this long
 
 
 def _key(user_id: str) -> str:
@@ -76,13 +78,28 @@ def _iso(t: datetime) -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-async def filled(conns: dict[int, Conn], objects: list[dict], analyzer_ids: list[int], hours: int) -> dict[int, list[str]]:
-    """Measures of these analyzers that have values for any of the objects ({server_id, object_id}) over the
-    last `hours`: {analyzer id: [columns]}. One request per server and analyzer, the whole period in one
-    aggregated bucket (0.02-0.5 s for a channel on the test systems)."""
-    end = datetime.now(timezone.utc)
-    begin = end - timedelta(hours=hours)
-    bucket = ({"interpolationIntervalType": "days", "interpolationInterval": hours // 24} if hours % 24 == 0 and hours > 24
+def period(hours: int, span: tuple[str, str] | None, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    """A chart's period in UTC: the last `hours`, or `span` — two "YYYY-MM-DDTHH:MM" times in the user's
+    time zone (an end in the future stops at now). ValueError for a span that is empty or too long."""
+    now = datetime.now(timezone.utc)
+    if not span:
+        return now - timedelta(hours=hours), now
+    begin, end = (datetime.fromisoformat(t).replace(tzinfo=tz).astimezone(timezone.utc) for t in span)
+    end = min(end, now)
+    if end <= begin:
+        raise ValueError("empty period")
+    if end - begin > timedelta(days=MAX_RANGE_DAYS):
+        raise ValueError(f"at most {MAX_RANGE_DAYS} days")
+    return begin, end
+
+
+async def filled(conns: dict[int, Conn], objects: list[dict], analyzer_ids: list[int], begin: datetime,
+                 end: datetime) -> dict[int, list[str]]:
+    """Measures of these analyzers that have values for any of the objects ({server_id, object_id}) in
+    [begin, end]: {analyzer id: [columns]}. One request per server and analyzer, the whole period in one or
+    two aggregated buckets (0.02-0.5 s for a channel on the test systems)."""
+    hours = math.ceil((end - begin).total_seconds() / 3600)
+    bucket = ({"interpolationIntervalType": "days", "interpolationInterval": math.ceil(hours / 24)} if hours > 24
               else {"interpolationIntervalType": "hours", "interpolationInterval": hours})
     work = []
     for sid in {o["server_id"] for o in objects}:
@@ -107,14 +124,14 @@ async def filled(conns: dict[int, Conn], objects: list[dict], analyzer_ids: list
     return {aid: sorted(cols) for aid, cols in out.items()}
 
 
-async def series(conns: dict[int, Conn], objects: list[dict], picked: list[dict], hours: int, tz: ZoneInfo) -> dict:
-    """Values of several measures ({analyzer_id, column}) of several objects ({server_id, object_id}) over the
-    last `hours`: average (and min / max per bucket when aggregated), one request per server and measure.
+async def series(conns: dict[int, Conn], objects: list[dict], picked: list[dict], begin: datetime, end: datetime,
+                 tz: ZoneInfo) -> dict:
+    """Values of several measures ({analyzer_id, column}) of several objects ({server_id, object_id}) in
+    [begin, end] (UTC): average (and min / max per bucket when aggregated), one request per server and measure.
     Measures with the same MultiProbe unit share one display unit (they go on one axis); it follows their peak.
     Times are the user's wall clock encoded as UTC milliseconds, as on the report pages."""
-    end = datetime.now(timezone.utc)
-    begin = end - timedelta(hours=hours)
-    resolution = "raw" if hours <= RAW_UP_TO else measures.pick_resolution("auto", begin, end)
+    raw = end - begin <= timedelta(hours=RAW_UP_TO)
+    resolution = "raw" if raw else measures.pick_resolution("auto", begin, end)
     interpolation = ({"forceDisableInterpolation": True} if resolution == "raw" else
                      {"interpolationIntervalType": measures.STEPS[resolution][1],
                       "interpolationInterval": measures.STEPS[resolution][2]})

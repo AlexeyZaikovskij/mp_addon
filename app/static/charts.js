@@ -108,8 +108,23 @@
       <div class="ch-bar ch-bar2">
         <span class="ch-info muted"></span>
         <span class="ch-tools">
-          <span class="presets ch-periods">${PERIODS.map((h) => `<button type="button" data-h="${h}">${escapeHtml(T[`ch_period_${h}`])}</button>`).join("")}</span>
+          <span class="presets ch-periods">${PERIODS.map((h) => `<button type="button" data-h="${h}">${escapeHtml(T[`ch_period_${h}`])}</button>`).join("")}
+            <button type="button" class="ch-span-btn" title="${escapeHtml(T.ch_span_hint)}">${escapeHtml(T.ch_span)}</button>
+            <div class="ch-span-pop" hidden>
+              <label>${escapeHtml(T.rec_from)}<input type="datetime-local" class="ch-span-from"></label>
+              <label>${escapeHtml(T.rec_to)}<input type="datetime-local" class="ch-span-to"></label>
+              <div class="ch-span-actions"><button type="button" class="primary small ch-span-apply">${escapeHtml(T.ch_span_apply)}</button>
+                <span class="error ch-span-error"></span></div>
+            </div></span>
           <span class="presets ch-sizes" title="${escapeHtml(T.ch_size)}">${SIZES.map((s) => `<button type="button" data-size="${s}">${s.toUpperCase()}</button>`).join("")}</span>
+          <span class="ch-export">
+            <button type="button" class="btn small ch-export-btn" title="${escapeHtml(T.ch_export_hint)}">${escapeHtml(T.ch_export)} ▾</button>
+            <div class="ch-export-menu" hidden>
+              <button type="button" data-export="report">${escapeHtml(T.ch_export_report)}</button>
+              <button type="button" data-export="png">${escapeHtml(T.ch_export_png)}</button>
+              <button type="button" data-export="csv">${escapeHtml(T.ch_export_csv)}</button>
+            </div>
+          </span>
           <button type="button" class="btn small" data-move="-1" title="${escapeHtml(T.ch_move_back)}">◀</button>
           <button type="button" class="btn small" data-move="1" title="${escapeHtml(T.ch_move_fwd)}">▶</button>
           <button type="button" class="btn small danger-btn" data-remove title="${escapeHtml(T.ch_remove)}">✕</button>
@@ -132,7 +147,10 @@
 
   function applyLook(p) {
     p.el.dataset.size = p.cfg.size;
-    for (const b of p.el.querySelectorAll(".ch-periods button")) b.classList.toggle("active", Number(b.dataset.h) === p.cfg.hours);
+    for (const b of p.el.querySelectorAll(".ch-periods button[data-h]")) b.classList.toggle("active", !p.cfg.span && Number(b.dataset.h) === p.cfg.hours);
+    const spanBtn = p.el.querySelector(".ch-span-btn");
+    spanBtn.classList.toggle("active", !!p.cfg.span);
+    spanBtn.textContent = p.cfg.span ? `${shortTime(p.cfg.span[0])} – ${shortTime(p.cfg.span[1])}` : T.ch_span;
     for (const b of p.el.querySelectorAll(".ch-sizes button")) b.classList.toggle("active", b.dataset.size === p.cfg.size);
   }
 
@@ -240,7 +258,7 @@
   const filledCache = new Map();
   async function loadFilled(p) {
     if (!p.measures.length) return;
-    const body = { objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), hours: p.cfg.hours };
+    const body = { objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), ...periodOf(p.cfg) };
     const key = JSON.stringify(body);
     const hit = filledCache.get(key);
     if (!hit || Date.now() - hit.at > FILLED_TTL_MS) {
@@ -248,7 +266,7 @@
     }
     try {
       const data = await filledCache.get(key).data;
-      if (JSON.stringify({ objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), hours: p.cfg.hours }) !== key) return;
+      if (JSON.stringify({ objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), ...periodOf(p.cfg) }) !== key) return;
       p.filled = data;
       renderMeasures(p);
     } catch { /* without it the list is simply not greyed */ }
@@ -309,11 +327,44 @@
     for (const b of p.el.querySelectorAll("[data-step]")) {
       b.addEventListener("click", () => (b.dataset.step === "obj" ? stepObject : stepMeasure)(p, Number(b.dataset.dir)));
     }
-    for (const b of p.el.querySelectorAll(".ch-periods button")) {
-      b.addEventListener("click", () => { p.cfg.hours = Number(b.dataset.h); applyLook(p); save(); loadData(p); loadFilled(p); });
+    for (const b of p.el.querySelectorAll(".ch-periods button[data-h]")) {
+      b.addEventListener("click", () => { p.cfg.hours = Number(b.dataset.h); p.cfg.span = null; setPeriod(p); });
     }
+    // An exact from-to period: the fields start from the chart's current period.
+    const spanPop = p.el.querySelector(".ch-span-pop");
+    const from = p.el.querySelector(".ch-span-from"), to = p.el.querySelector(".ch-span-to");
+    p.el.querySelector(".ch-span-btn").addEventListener("click", () => {
+      spanPop.hidden = !spanPop.hidden;
+      if (spanPop.hidden) return;
+      const [a, b] = p.cfg.span || [shiftTime(nowStr, -p.cfg.hours * 60), nowStr];
+      from.value = a;
+      to.value = b;
+      p.el.querySelector(".ch-span-error").textContent = "";
+    });
+    document.addEventListener("click", (e) => {
+      if (!spanPop.hidden && !e.composedPath().includes(p.el.querySelector(".ch-periods"))) spanPop.hidden = true;
+    });
+    p.el.querySelector(".ch-span-apply").addEventListener("click", () => {
+      const err = p.el.querySelector(".ch-span-error");
+      if (!from.value || !to.value || to.value <= from.value) { err.textContent = T.err_period; return; }
+      if (Date.parse(`${to.value}:00Z`) - Date.parse(`${from.value}:00Z`) > MAX_SPAN_DAYS * 86_400_000) {
+        err.textContent = T.ch_span_too_long.replace("{n}", MAX_SPAN_DAYS);
+        return;
+      }
+      p.cfg.span = [from.value, to.value];
+      spanPop.hidden = true;
+      setPeriod(p);
+    });
     for (const b of p.el.querySelectorAll(".ch-sizes button")) {
       b.addEventListener("click", () => { p.cfg.size = b.dataset.size; applyLook(p); save(); });
+    }
+    const menu = p.el.querySelector(".ch-export-menu");
+    p.el.querySelector(".ch-export-btn").addEventListener("click", () => { menu.hidden = !menu.hidden; });
+    document.addEventListener("click", (e) => {
+      if (!menu.hidden && !e.composedPath().includes(p.el.querySelector(".ch-export"))) menu.hidden = true;
+    });
+    for (const b of menu.querySelectorAll("[data-export]")) {
+      b.addEventListener("click", () => { menu.hidden = true; ({ report: openReport, png: savePng, csv: saveCsv })[b.dataset.export](p); });
     }
     for (const b of p.el.querySelectorAll("[data-move]")) b.addEventListener("click", () => move(p, Number(b.dataset.move)));
     p.el.querySelector("[data-remove]").addEventListener("click", () => remove(p));
@@ -365,6 +416,21 @@
     renderObjects(p);
     save();
     loadData(p);
+  }
+
+  // --- Period: the last hours, or an exact from-to (cfg.span: two "YYYY-MM-DDTHH:MM" in the user's zone) ---
+  const MAX_SPAN_DAYS = 31;  // as charts.MAX_RANGE_DAYS
+  let nowStr = "";  // "now" in the user's time zone when the page was opened (from the server)
+  const periodOf = (cfg) => (cfg.span ? { span: cfg.span } : { hours: cfg.hours });
+  const shortTime = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)} ${s.slice(11, 16)}`;
+  // Minutes added to a "YYYY-MM-DDTHH:MM" time, read as UTC so the browser's own zone does not interfere.
+  const shiftTime = (s, minutes) => new Date(Date.parse(`${s}:00Z`) + minutes * 60_000).toISOString().slice(0, 16);
+
+  function setPeriod(p) {
+    applyLook(p);
+    save();
+    loadData(p);
+    loadFilled(p);
   }
 
   function flash(p, text) {
@@ -424,7 +490,7 @@
     const seq = ++p.seq;
     let data;
     try {
-      data = await api("/api/charts/data", { objects: c.objects, measures: c.measures, hours: c.hours });
+      data = await api("/api/charts/data", { objects: c.objects, measures: c.measures, ...periodOf(c) });
     } catch (err) {
       if (seq === p.seq) showText(p, err.message, true);
       return;
@@ -454,6 +520,72 @@
     const box = p.el.querySelector(".ch-chart");
     if (!p.chart) { box.innerHTML = ""; p.chart = echarts.init(box, null, { renderer: "canvas" }); }
     p.chart.setOption(option(p, data), true);
+    p.data = data;
+  }
+
+  // --- Export -------------------------------------------------------------------------------------------
+  // The full way: the measurement report with the chart's channels, measures and period (its page has
+  // CSV / XML / PDF with the charts and min / avg / max), in a new tab so the board stays.
+  async function openReport(p) {
+    const c = p.cfg;
+    if (!c.objects.length || !c.measures.length) return flash(p, T.ch_pick_hint);
+    const targets = new Map();
+    for (const x of c.objects) {
+      const k = `${x.server_id}:${x.node_id}`;
+      if (!targets.has(k)) targets.set(k, { server_id: x.server_id, node_id: x.node_id, object_ids: [] });
+      targets.get(k).object_ids.push(x.id);
+    }
+    const measures = {};
+    for (const m of c.measures) (measures[m.analyzer_id] ||= []).push(m.column);
+    const period = c.span ? { period_from: `${c.span[0]}:00`, period_to: `${c.span[1]}:00` } : { period_hours: c.hours };
+    const tab = window.open("about:blank", "_blank");  // opened by the click itself, so no pop-up blocker
+    try {
+      const { id } = await api("/api/report", { type: "measures", targets: [...targets.values()], measures, ...period,
+        resolution: "auto", with_chart: true, sections: ["charts", "summary", "values"] });
+      if (tab) tab.location.href = `/report/${id}`; else location.href = `/report/${id}`;
+    } catch (err) {
+      if (tab) tab.close();
+      flash(p, `${T.ch_export_failed}: ${err.message}`);
+    }
+  }
+
+  // The quick ways: what the chart shows, as a picture or as a table of its points.
+  const fileStamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`; };
+  const fileName = (p, ext) => {
+    const what = p.cfg.objects.length === 1 ? pickedLabel(p, p.cfg.objects[0]) : T.nav_charts;
+    return `${what.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 60)}_${fileStamp()}.${ext}`;
+  };
+  function download(href, name) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  function savePng(p) {
+    if (!p.chart) return flash(p, T.ch_pick_hint);
+    download(p.chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: css("--card") }), fileName(p, "png"));
+  }
+
+  function saveCsv(p) {
+    if (!p.chart || !p.data || !p.lines) return flash(p, T.ch_pick_hint);
+    const sep = window.CSV_DELIMITER || ";", comma = sep === ";";
+    const num = (v) => (v === null || v === undefined ? "" : String(Math.round(v * 10000) / 10000).replace(".", comma ? "," : "."));
+    const cell = (s) => (/[";\n,\t]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    const times = [...new Set(p.lines.flatMap((l) => l.s.avg.map((x) => x[0])))].sort((a, b) => a - b);
+    const byTime = p.lines.map((l) => new Map(l.s.avg.map((x) => [x[0], x[1]])));
+    const rows = [[T.col_time, ...p.lines.map((l) => `${l.name}${l.s.unit ? `, ${l.s.unit}` : ""}`)].map(cell).join(sep)];
+    for (const t of times) {
+      const d = new Date(t);  // the user's wall clock encoded as UTC
+      const when = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+      rows.push([when, ...byTime.map((m) => num(m.get(t)))].join(sep));
+    }
+    const blob = new Blob(["\ufeff" + rows.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    download(url, fileName(p, "csv"));
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   function option(p, data) {
@@ -522,7 +654,7 @@
         axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false },
         axisLabel: { color: MUTED, hideOverlap: true, formatter: (v) => {
           const d = new Date(v);
-          return c.hours > 24 ? `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}` : `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+          return data.to - data.from > 86_400_000 ? `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}` : `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
         } },
         splitLine: { show: true, lineStyle: { color: GRID } },
       },
@@ -555,9 +687,13 @@
 
   let scope = null;
   async function start() {
+    // A chart added before the node list is in would have no source to show.
+    for (const b of [$("#add"), $("#add-empty")]) b.disabled = true;
     const [board, nodeList] = await Promise.all([api("/api/charts/board"), api("/api/nodes")]);
+    for (const b of [$("#add"), $("#add-empty")]) b.disabled = false;
     nodes = nodeList.nodes;
     scope = board.scope;
+    nowStr = board.now;
     $("#no-servers").hidden = nodeList.connected;
     if (nodeList.errors.length) {
       $("#ch-message").innerHTML = nodeList.errors.map((e) =>

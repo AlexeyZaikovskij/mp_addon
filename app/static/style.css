@@ -563,6 +563,23 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .ch-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
 .ch-tools .presets { margin: 0; gap: 4px; }
 .ch-tools .presets button { padding: 2px 7px; font-size: 12px; }
+.ch-periods { position: relative; }
+.ch-span-pop { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; width: 240px; display: flex; flex-direction: column;
+  gap: 8px; padding: 10px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.ch-span-pop label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
+.ch-span-pop input { width: 100%; box-sizing: border-box; }
+.ch-span-actions { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ch-span-btn { white-space: nowrap; }
+.ch-span-error:empty { display: none; }
+.ch-export { position: relative; }
+.ch-export-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; min-width: 210px; padding: 4px;
+  background: var(--raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.ch-export-menu button { display: block; width: 100%; padding: 6px 10px; border: 0; border-radius: 4px; background: none;
+  color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ch-export-menu button:hover { background: var(--hover); }
+.ch-tools .presets .ch-span-apply { background: var(--primary); border-color: var(--primary); color: var(--primary-text); padding: 4px 14px; }
+.ch-tools .presets .ch-span-apply:hover { background: var(--primary-hover); }
 .ch-chart { height: 300px; min-width: 0; }
 .ch-panel[data-size="s"] .ch-chart { height: 220px; }
 .ch-panel[data-size="l"] .ch-chart { height: 360px; }

@@ -47,7 +47,8 @@ async def measures(conns: list) -> list[dict]:
     if not count:
         return []
     groups = await charts.measure_list(first, list(count))
-    filled = await charts.filled({c.server_id: c for c in conns}, objs, list(count), 24)
+    now = datetime.now(timezone.utc)
+    filled = await charts.filled({c.server_id: c for c in conns}, objs, list(count), now - timedelta(hours=24), now)
     for g in groups:
         g["channels"] = count[g["id"]]
         have = set(filled.get(g["id"], []))

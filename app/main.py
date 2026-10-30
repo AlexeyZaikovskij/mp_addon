@@ -642,7 +642,8 @@ async def api_patterns_get(job_id: str, session: sessions.Session = Depends(curr
 # --- Charts: each user's own board ------------------------------------------------------------------------
 @app.get("/charts", response_class=HTMLResponse)
 async def charts_page(request: Request, session: sessions.Session = Depends(current_session)):
-    return render(request, "charts.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
+    return render(request, "charts.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)),
+                  csv_delimiter=settings.csv_delimiter)
 
 
 class ChartObject(BaseModel):
@@ -663,6 +664,7 @@ class ChartPanel(BaseModel):
     objects: list[ChartObject] = Field(default_factory=list, max_length=charts.MAX_OBJECTS)
     measures: list["ChartMeasure"] = Field(default_factory=list, max_length=charts.MAX_MEASURES)
     hours: int = 24
+    span: list[str] | None = Field(None, min_length=2, max_length=2)  # exact from-to instead of the last hours
     size: Literal["s", "m", "l"] = "m"
 
 
@@ -672,7 +674,9 @@ class ChartBoard(BaseModel):
 
 @app.get("/api/charts/board")
 async def api_charts_board(session: sessions.Session = Depends(current_session)):
-    return {"panels": charts.load_board(session.user_id), "scope": session.scope}
+    # "now" in the user's time zone: the exact-period fields start from it.
+    now = datetime.now(_user_tz(session)).strftime("%Y-%m-%dT%H:%M")
+    return {"panels": charts.load_board(session.user_id), "scope": session.scope, "now": now}
 
 
 @app.put("/api/charts/board")
@@ -702,31 +706,40 @@ class ChartFilledIn(BaseModel):
     objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
     analyzer_ids: list[int] = Field(max_length=100)
     hours: int = 24
+    span: list[str] | None = Field(None, min_length=2, max_length=2)
+
+
+def _chart_period(hours: int, span: list[str] | None, session: sessions.Session) -> tuple[datetime, datetime]:
+    if not span and hours not in charts.PERIODS:
+        raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
+    try:
+        return charts.period(hours, tuple(span) if span else None, _user_tz(session))
+    except ValueError as exc:
+        raise HTTPException(422, f"period: {exc}")
 
 
 @app.post("/api/charts/filled")
 async def api_charts_filled(body: ChartFilledIn, session: sessions.Session = Depends(current_session)):
     """Which measures of the chart's channels have values in its period (the others are greyed in the list)."""
-    if body.hours not in charts.PERIODS:
-        raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
+    begin, end = _chart_period(body.hours, body.span, session)
     conns = {o.server_id: session.conn(o.server_id) for o in body.objects}
     return await charts.filled(conns, [{"server_id": o.server_id, "object_id": o.id} for o in body.objects],
-                               body.analyzer_ids, body.hours)
+                               body.analyzer_ids, begin, end)
 
 
 class ChartDataIn(BaseModel):
     objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
     measures: list[ChartMeasure] = Field(min_length=1, max_length=charts.MAX_MEASURES)
     hours: int = 24
+    span: list[str] | None = Field(None, min_length=2, max_length=2)
 
 
 @app.post("/api/charts/data")
 async def api_charts_data(body: ChartDataIn, session: sessions.Session = Depends(current_session)):
-    if body.hours not in charts.PERIODS:
-        raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
+    begin, end = _chart_period(body.hours, body.span, session)
     conns = {o.server_id: session.conn(o.server_id) for o in body.objects}
     return await charts.series(conns, [{"server_id": o.server_id, "object_id": o.id} for o in body.objects],
-                               [m.model_dump() for m in body.measures], body.hours, _user_tz(session))
+                               [m.model_dump() for m in body.measures], begin, end, _user_tz(session))
 
 
 @app.get("/api/overview/top")

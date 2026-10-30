@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
+from . import auth, charts, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -573,6 +573,63 @@ async def api_overview_state(session: sessions.Session = Depends(current_session
 async def api_overview_servers(session: sessions.Session = Depends(current_session)):
     """Load, objects and licences of the shown servers (MultiProbe's Administration -> Nodes)."""
     return await server_info.servers(session.scoped(), _user_tz(session))
+
+
+# --- Charts: each user's own board ------------------------------------------------------------------------
+@app.get("/charts", response_class=HTMLResponse)
+async def charts_page(request: Request, session: sessions.Session = Depends(current_session)):
+    return render(request, "charts.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
+
+
+class ChartPanel(BaseModel):
+    id: str = Field(max_length=40)
+    server_id: int | None = None
+    node_id: int | None = None
+    object_id: str | None = Field(None, max_length=80)
+    analyzer_id: int | None = None
+    column: str | None = Field(None, max_length=120)
+    hours: int = 24
+    size: Literal["s", "m", "l"] = "m"
+
+
+class ChartBoard(BaseModel):
+    panels: list[ChartPanel] = Field(max_length=48)
+
+
+@app.get("/api/charts/board")
+async def api_charts_board(session: sessions.Session = Depends(current_session)):
+    return {"panels": charts.load_board(session.user_id), "scope": session.scope}
+
+
+@app.put("/api/charts/board")
+async def api_charts_board_save(body: ChartBoard, session: sessions.Session = Depends(current_session)):
+    for p in body.panels:
+        if p.hours not in charts.PERIODS:
+            p.hours = 24
+    charts.save_board(session.user_id, [p.model_dump() for p in body.panels])
+    return {"ok": True}
+
+
+@app.get("/api/charts/objects")
+async def api_charts_objects(server_id: int, node_id: int, session: sessions.Session = Depends(current_session)):
+    return await charts.objects(session.conn(server_id), node_id)
+
+
+@app.get("/api/charts/measures")
+async def api_charts_measures(server_id: int, analyzers: str, session: sessions.Session = Depends(current_session)):
+    try:
+        ids = [int(a) for a in analyzers.split(",") if a]
+    except ValueError:
+        raise HTTPException(422, "analyzers: comma-separated ids")
+    return await charts.measure_list(session.conn(server_id), ids)
+
+
+@app.get("/api/charts/data")
+async def api_charts_data(server_id: int, object_id: str, analyzer_id: int, column: str, hours: int = 24,
+                          session: sessions.Session = Depends(current_session)):
+    if hours not in charts.PERIODS:
+        raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
+    return await charts.series(session.conn(server_id), object_id, analyzer_id, column, hours, _user_tz(session))
 
 
 @app.get("/api/overview/top")

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h1>{{ t("nav_charts") }}</h1>
+    <div class="overview-tools">
+      <span class="muted">{{ t("ov_updated") }}: <b id="updated">—</b></span>
+      <button type="button" class="link" id="refresh">{{ t("ov_refresh") }}</button>
+      <button type="button" class="primary" id="add">+ {{ t("ch_add") }}</button>
+    </div>
+  </div>
+  <p class="muted">{{ t("ch_hint") }}</p>
+  <div id="ch-message"></div>
+</section>
+
+<section class="card notice-card" id="no-servers" hidden>
+  {{ t("no_servers_connected") }} <a class="link" href="/servers">{{ t("nav_servers") }} →</a>
+</section>
+<section class="card" id="ch-empty" hidden>
+  <p class="muted">{{ t("ch_empty") }}</p>
+  <button type="button" class="primary" id="add-empty">+ {{ t("ch_add") }}</button>
+</section>
+<div class="ch-grid" id="board"></div>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }};</script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/charts.js?v={{ static_version() }}"></script>
+{% endblock %}

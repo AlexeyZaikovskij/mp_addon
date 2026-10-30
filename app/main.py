@@ -581,11 +581,17 @@ async def charts_page(request: Request, session: sessions.Session = Depends(curr
     return render(request, "charts.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
 
 
+class ChartObject(BaseModel):
+    server_id: int
+    node_id: int
+    id: str = Field(max_length=80)
+
+
 class ChartPanel(BaseModel):
     id: str = Field(max_length=40)
-    server_id: int | None = None
+    server_id: int | None = None  # the source whose channel list the chart shows
     node_id: int | None = None
-    object_id: str | None = Field(None, max_length=80)
+    objects: list[ChartObject] = Field(default_factory=list, max_length=charts.MAX_OBJECTS)
     analyzer_id: int | None = None
     column: str | None = Field(None, max_length=120)
     hours: int = 24
@@ -624,12 +630,20 @@ async def api_charts_measures(server_id: int, analyzers: str, session: sessions.
     return await charts.measure_list(session.conn(server_id), ids)
 
 
-@app.get("/api/charts/data")
-async def api_charts_data(server_id: int, object_id: str, analyzer_id: int, column: str, hours: int = 24,
-                          session: sessions.Session = Depends(current_session)):
-    if hours not in charts.PERIODS:
+class ChartDataIn(BaseModel):
+    objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
+    analyzer_id: int
+    column: str = Field(max_length=120)
+    hours: int = 24
+
+
+@app.post("/api/charts/data")
+async def api_charts_data(body: ChartDataIn, session: sessions.Session = Depends(current_session)):
+    if body.hours not in charts.PERIODS:
         raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
-    return await charts.series(session.conn(server_id), object_id, analyzer_id, column, hours, _user_tz(session))
+    conns = {o.server_id: session.conn(o.server_id) for o in body.objects}
+    return await charts.series(conns, [{"server_id": o.server_id, "object_id": o.id} for o in body.objects],
+                               body.analyzer_id, body.column, body.hours, _user_tz(session))
 
 
 @app.get("/api/overview/top")

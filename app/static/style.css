@@ -510,6 +510,28 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .ch-step select { flex: 1 1 auto; width: 0; }
 .ch-step .btn.small { font-size: 16px; line-height: 1; padding: 3px 8px; }
 .ch-bar2 { justify-content: space-between; font-size: 12px; }
+.ch-objs { position: relative; }
+.ch-pick-btn { flex: 1 1 auto; width: 0; text-align: left; padding: 4px 22px 4px 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--text); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
+.ch-pick-btn::after { content: "▾"; position: absolute; right: 7px; color: var(--muted); }
+.ch-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 260px;
+  background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.ch-pop .ch-search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.ch-list { max-height: 300px; overflow-y: auto; }
+.ch-item { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  font-size: 13px; color: var(--text); }
+.ch-item:hover { background: var(--hover); }
+.ch-item.muted { color: var(--muted); }
+.ch-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.ch-chips:empty { display: none; }
+.ch-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--field); max-width: 100%; }
+.ch-chip i { width: 10px; height: 4px; border-radius: 2px; flex: none; }
+.ch-chip .link { padding: 0 4px; font-size: 11px; color: var(--muted); }
+.ch-chip-empty { color: var(--muted); border-style: dashed; }
+.ch-chip-empty i { opacity: .35; }
 .ch-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
 .ch-tools .presets { margin: 0; gap: 4px; }
 .ch-tools .presets button { padding: 2px 7px; font-size: 12px; }

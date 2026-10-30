@@ -430,6 +430,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "ch_next": {"en": "Next", "ru": "Следующий"},
     "ch_save_failed": {"en": "The chart set could not be saved", "ru": "Не удалось сохранить набор графиков"},
     "ch_search": {"en": "Search channels", "ru": "Поиск каналов"},
+    "ch_reset": {"en": "Reset", "ru": "Сбросить"},
+    "ch_reset_hint": {"en": "Untick every channel of the chart", "ru": "Снять все каналы графика"},
     "ch_no_match": {"en": "No channels match.", "ru": "Нет подходящих каналов."},
     "ch_n_channels": {"en": "{n} channels", "ru": "Каналов: {n}"},
     "ch_remove_channel": {"en": "Remove from the chart", "ru": "Убрать с графика"},

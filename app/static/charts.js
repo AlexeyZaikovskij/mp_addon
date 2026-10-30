@@ -93,7 +93,10 @@
           <button type="button" class="ch-pick-btn" title="${escapeHtml(T.ch_channel)}"></button>
           <button type="button" class="btn small" data-step="obj" data-dir="1" title="${escapeHtml(T.ch_next)}">›</button>
           <div class="ch-pop" hidden>
-            <input type="search" class="ch-search" placeholder="${escapeHtml(T.ch_search)}">
+            <div class="ch-pop-head">
+              <input type="search" class="ch-search" placeholder="${escapeHtml(T.ch_search)}">
+              <button type="button" class="btn small ch-reset" title="${escapeHtml(T.ch_reset_hint)}">${escapeHtml(T.ch_reset)}</button>
+            </div>
             <div class="ch-list"></div>
           </div>
         </span>
@@ -185,6 +188,7 @@
     p.el.querySelector(".ch-pick-btn").textContent = text || (n === 0 ? T.ch_pick : n === 1 ? pickedLabel(p, p.cfg.objects[0])
       : T.ch_n_channels.replace("{n}", n));
     for (const b of p.el.querySelectorAll('[data-step="obj"]')) b.disabled = n > 1;
+    p.el.querySelector(".ch-reset").disabled = n === 0;
     const q = p.el.querySelector(".ch-search").value.trim().toLowerCase();
     p.el.querySelector(".ch-list").innerHTML = p.objects.filter((o) => !q || objLabel(o).toLowerCase().includes(q)).map((o) =>
       `<label class="ch-item${hasMeasure(o, p.cfg) ? "" : " muted"}"><input type="checkbox" value="${escapeHtml(o.id)}"${isPicked(p, o) ? " checked" : ""}>
@@ -274,6 +278,10 @@
     });
     document.addEventListener("click", (e) => { if (!pop.hidden && !p.el.querySelector(".ch-objs").contains(e.target)) pop.hidden = true; });
     p.el.querySelector(".ch-search").addEventListener("input", () => renderPicker(p));
+    p.el.querySelector(".ch-reset").addEventListener("click", () => {
+      p.el.querySelector(".ch-search").value = "";
+      setObjects(p, []);
+    });
     p.el.querySelector(".ch-list").addEventListener("change", (e) => {
       if (e.target.type === "checkbox") toggleObject(p, e.target.value, e.target.checked);
     });

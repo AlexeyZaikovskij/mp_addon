@@ -532,7 +532,8 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .ch-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 260px;
   background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
-.ch-pop .ch-search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.ch-pop-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.ch-pop .ch-search { flex: 1 1 auto; min-width: 0; box-sizing: border-box; }
 .ch-list { max-height: 300px; overflow-y: auto; }
 .ch-item { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 4px; cursor: pointer;
   font-size: 13px; color: var(--text); }

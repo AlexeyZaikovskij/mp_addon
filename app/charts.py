@@ -77,8 +77,9 @@ async def series(conn: Conn, object_id: str, analyzer_id: int, column: str, hour
 
     meta = next((m for m in ((await mp_client.measure_catalog(conn)).get(analyzer_id) or {}).get("measureItemList") or []
                  if m.get("columnName") == column), {})
-    avgs = [abs(p.avg) for p in points if p.avg is not None]
-    unit, mult = units.choose(meta.get("unit") or "", sum(avgs) / len(avgs) if avgs else None)
+    # The unit follows the peak, so the axis labels stay under a thousand whatever dips the period has.
+    peaks = [abs(v) for p in points for v in (p.max, p.avg) if v is not None]
+    unit, mult = units.choose(meta.get("unit") or "", max(peaks) if peaks else None)
     ms = lambda t: round(t.replace(tzinfo=timezone.utc).timestamp() * 1000)  # noqa: E731
     val = lambda v: None if v is None else v * mult  # noqa: E731
     return {

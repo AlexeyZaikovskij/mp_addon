@@ -37,8 +37,14 @@
   </section>
   <div class="pt-grid">
     <section class="card">
-      <h2>{{ t("pt_heat") }}</h2>
-      <p class="muted note">{{ t("pt_heat_hint") }}</p>
+      <div class="section-head">
+        <h2>{{ t("pt_heat") }}</h2>
+        <span class="presets ov-views" id="heat-view">
+          <button type="button" data-view="weekdays" class="active">{{ t("pt_heat_weekdays") }}</button>
+          <button type="button" data-view="dates">{{ t("pt_heat_dates") }}</button>
+        </span>
+      </div>
+      <p class="muted note" id="heat-hint"></p>
       <div id="heat" class="pt-heat"></div>
     </section>
     <section class="card">

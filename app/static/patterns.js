@@ -4,7 +4,7 @@
   const $ = (sel) => document.querySelector(sel);
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const FLAP_PER_DAY = 20;  // as in patterns.py
-  const WD = T.pt_wd.split(","), WD_LONG = T.pt_wd_long.split(",");
+  const WD = T.pt_wd.split(","), WD_LONG = T.pt_wd_long.split(","), WD_LONG_NOM = T.pt_wd_nom.split(",");
   // Priority bands of MultiProbe, the same colours as the overview.
   const prioColor = (p) => p >= 400 ? "#e54848" : p >= 300 ? "#ec835a" : p >= 200 ? "#fab219" : "#50b3d0";
 
@@ -33,6 +33,8 @@
   }
 
   let days = 14;
+  let result = null;
+  let heatView = "weekdays";
   for (const b of document.querySelectorAll("#days button")) {
     b.addEventListener("click", () => {
       days = Number(b.dataset.days);
@@ -72,7 +74,8 @@
       + (r.busy_hours.length ? ` ${fmt(T.pt_busy, { hours: r.busy_hours.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ") })}` : "");
     $("#pt-result").hidden = false;
     renderFindings(r);
-    renderHeat(r.heat);
+    result = r;
+    renderHeat();
     renderFlapping(r);
   }
 
@@ -109,22 +112,39 @@
 
   const heat = echarts.init($("#heat"));
   window.addEventListener("resize", () => heat.resize());
-  function renderHeat(grid) {
+  // Columns are the hours of the day. Rows: the weekdays, each cell the sum over every such weekday of the
+  // period (28 days = 4 Mondays), or every date of the period one by one.
+  const hh = (h) => String(h).padStart(2, "0");
+  function renderHeat() {
+    const r = result;
+    const byDate = heatView === "dates";
+    const rows = byDate ? r.heat_dates.map((d) => d.hours) : r.heat;
+    const labels = byDate ? r.heat_dates.map((d) => `${WD[d.weekday]} ${d.date}`) : WD;
+    const datesOf = (wd) => r.heat_dates.filter((d) => d.weekday === wd).map((d) => d.date);
+    $("#heat-hint").textContent = byDate ? T.pt_heat_hint_dates : T.pt_heat_hint_weekdays;
+    $("#heat").style.height = `${byDate ? Math.max(250, rows.length * 20 + 60) : 250}px`;
     // Colour by the square root: a few very busy hours would otherwise leave every other cell alike.
-    const data = [], max = Math.sqrt(Math.max(1, ...grid.flat()));
-    grid.forEach((row, d) => row.forEach((n, h) => data.push([h, d, n ? Math.sqrt(n) : "-", n])));
+    const data = [], max = Math.sqrt(Math.max(1, ...rows.flat()));
+    rows.forEach((row, d) => row.forEach((n, h) => data.push([h, d, n ? Math.sqrt(n) : "-", n])));
     heat.setOption({
       animation: false,
-      tooltip: { formatter: (p) => `${WD[p.value[1]]} ${String(p.value[0]).padStart(2, "0")}:00 — <b>${p.value[3]}</b>`,
+      tooltip: { formatter: (p) => {
+        const [h, d, , n] = p.value;
+        const head = `<b>${byDate ? labels[d] : WD_LONG_NOM[d]}, ${hh(h)}:00–${hh(h + 1 === 24 ? 0 : h + 1)}:00</b>`;
+        const sub = byDate ? "" : `<br><span style="opacity:.75">${escapeHtml(fmt(T.pt_heat_over, { dates: datesOf(d).join(", ") }))}</span>`;
+        return `${head}<br>${escapeHtml(fmt(T.pt_heat_starts, { n }))}${sub}`;
+      },
         backgroundColor: css("--raised"), borderColor: css("--border"), textStyle: { color: css("--text"), fontSize: 12 } },
-      grid: { left: 36, right: 8, top: 6, bottom: 26 },
-      xAxis: { type: "category", data: [...Array(24).keys()].map((h) => String(h).padStart(2, "0")),
+      grid: { left: byDate ? 70 : 36, right: 8, top: 6, bottom: 40 },
+      xAxis: { type: "category", data: [...Array(24).keys()].map(hh), name: T.pt_heat_hour, nameLocation: "middle", nameGap: 26,
+        nameTextStyle: { color: css("--muted"), fontSize: 11 },
         axisLabel: { color: css("--muted"), fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false }, splitArea: { show: false } },
-      yAxis: { type: "category", data: WD, inverse: true, axisLabel: { color: css("--muted") }, axisLine: { show: false }, axisTick: { show: false } },
+      yAxis: { type: "category", data: labels, inverse: true, axisLabel: { color: css("--muted"), fontSize: byDate ? 10 : 12 },
+        axisLine: { show: false }, axisTick: { show: false } },
       visualMap: { min: 0, max, show: false, dimension: 2, inRange: { color: [css("--field"), "#ec835a", "#e54848"] } },
       series: [{ type: "heatmap", data, itemStyle: { borderColor: css("--card"), borderWidth: 2, borderRadius: 3 }, emphasis: { disabled: true } }],
     }, true);
-    heat.resize();  // the block was hidden when the chart was created
+    heat.resize();  // the block was hidden when the chart was created; the "by date" view is taller
   }
 
   function renderFlapping(r) {
@@ -139,6 +159,13 @@
       : `<p class="muted">${escapeHtml(T.pt_no_flapping)}</p>`;
   }
 
+  for (const b of document.querySelectorAll("#heat-view button")) {
+    b.addEventListener("click", () => {
+      heatView = b.dataset.view;
+      for (const x of document.querySelectorAll("#heat-view button")) x.classList.toggle("active", x === b);
+      if (result) renderHeat();
+    });
+  }
   $("#run").addEventListener("click", run);
   $("#scope")?.addEventListener("change", async (e) => {
     const v = e.target.value;

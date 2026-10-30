@@ -133,10 +133,15 @@ async def analyse(job: Job, conns: list, tz_name: str, days: int, level: int) ->
     # every hour) ---------------------------------------------------------------------------------------
     flappers = {(f["server"], f["node"], f["object_id"], f["alarm"]) for f in flapping}
     heat = [[0] * 24 for _ in range(7)]
+    first_day = begin.astimezone(tz).date()
+    dates = [first_day + timedelta(days=i) for i in range((end.astimezone(tz).date() - first_day).days + 1)]
+    by_date = {d: [0] * 24 for d in dates}  # the same counts date by date, for the "by date" view
     for key, items in groups.items():
         if key not in flappers:
             for r in items:
                 heat[r.detected.weekday()][r.detected.hour] += 1
+                if r.detected.date() in by_date:
+                    by_date[r.detected.date()][r.detected.hour] += 1
 
     # Recurring alarms at the same time on several channels of one stream, or on several streams of one
     # node, point above the channel: they are reported as one finding.
@@ -146,7 +151,9 @@ async def analyse(job: Job, conns: list, tz_name: str, days: int, level: int) ->
     return {
         "days": days, "level": level, "events": len(rows), "channels": len({(r.server, r.object_id) for r in rows}),
         "period": [begin.astimezone(tz).strftime("%d.%m.%Y %H:%M"), end.astimezone(tz).strftime("%d.%m.%Y %H:%M")],
-        "heat": heat, "busy_hours": [h for n, h in hours[:3] if n],
+        "heat": heat,
+        "heat_dates": [{"date": d.strftime("%d.%m"), "weekday": d.weekday(), "hours": by_date[d]} for d in dates],
+        "busy_hours": [h for n, h in hours[:3] if n],
         "findings": findings, "flapping": flapping[:TOP_FLAPPING], "flapping_total": len(flapping),
     }
 

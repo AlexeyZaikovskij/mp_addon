@@ -166,13 +166,93 @@
       if (result) renderHeat();
     });
   }
+  // --- Measurements -----------------------------------------------------------------------------------
+  // One measure for every channel that has it: hours regularly off the channel's usual level, and drift.
+  async function loadMeasures() {
+    const sel = $("#mp-measure");
+    sel.innerHTML = `<option value="">${escapeHtml(T.loading)}</option>`;
+    $("#mp-run").disabled = true;
+    let groups;
+    try {
+      groups = await api("/api/patterns/measures");
+    } catch (err) {
+      sel.innerHTML = "";
+      $("#mp-status").innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+      return;
+    }
+    // Groups and measures without values in the last day are greyed (as on the Charts page).
+    sel.innerHTML = `<option value="">${escapeHtml(T.ch_pick)}</option>` + groups.map((g) =>
+      `<optgroup label="${escapeHtml(`${g.name} · ${fmt(T.mp_channels, { n: g.channels })}${g.filled ? "" : ` — ${T.ch_empty_group}`}`)}"${g.filled ? "" : ' class="ch-off"'}>${
+        g.measures.map((m) => `<option value="${g.id}|${escapeHtml(m.column)}"${m.filled ? "" : ' class="ch-off"'}>${escapeHtml(m.name)}${m.unit ? `, ${escapeHtml(m.unit)}` : ""}</option>`).join("")
+      }</optgroup>`).join("");
+    $("#mp-run").disabled = false;
+  }
+
+  let mpSeq = 0;
+  async function runMeasures() {
+    const v = $("#mp-measure").value;
+    if (!v) { $("#mp-status").textContent = T.mp_pick; return; }
+    const seq = ++mpSeq;
+    const btn = $("#mp-run");
+    btn.disabled = true;
+    $("#mp-bar").hidden = false;
+    $("#mp-result").innerHTML = "";
+    $("#mp-status").textContent = `${T.loading} 0%`;
+    try {
+      const { id } = await api("/api/patterns/measure", { days, analyzer_id: Number(v.split("|")[0]), column: v.slice(v.indexOf("|") + 1) });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1200));
+        if (seq !== mpSeq) return;
+        const st = await api(`/api/patterns/${id}`);
+        $("#mp-bar .bar-fill").style.width = `${st.percent}%`;
+        if (st.state === "error") throw new Error(st.error);
+        if (st.state === "done") { renderMeasures(st.result); break; }
+        $("#mp-status").textContent = `${T.loading} ${st.percent}%`;
+      }
+    } catch (err) {
+      $("#mp-status").innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+    } finally {
+      if (seq === mpSeq) { btn.disabled = false; $("#mp-bar").hidden = true; }
+    }
+  }
+
+  const num = (v) => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100).toLocaleString(LANG);
+  function renderMeasures(r) {
+    const hist = r.history_days ? fmt(T.mp_history, { n: r.history_days, from: r.history_from }) : "";
+    $("#mp-status").textContent = fmt(T.mp_summary, { channels: r.channels, data: r.with_data, flat: r.flat });
+    const common = r.common.map((c) => `<div class="mp-common">${escapeHtml(fmt(c.sign < 0 ? T.mp_common_down : T.mp_common_up,
+      { n: c.channels, of: c.of, p: Math.round(Math.abs(c.median) * 100) }))}</div>`).join("");
+    const items = r.findings.map((f) => {
+      const lines = f.hours.map((h) => {
+        const range = `${hh(h.from)}:00–${hh(h.to === 24 ? 0 : h.to)}:00`;
+        return `<li class="${h.sign < 0 ? "mp-down" : "mp-up"}">${escapeHtml(fmt(h.sign < 0 ? T.mp_below : T.mp_above,
+          { range, p: Math.round(Math.abs(h.deviation) * 100), v: `${num(h.value)} ${r.unit}`, n: h.days, of: h.of_days }))}</li>`;
+      });
+      if (f.trend) {
+        lines.push(`<li class="${f.trend < 0 ? "mp-down" : "mp-up"}">${escapeHtml(fmt(f.trend < 0 ? T.mp_trend_down : T.mp_trend_up,
+          { p: Math.round(Math.abs(f.trend) * 100), a: `${num(f.trend_from)} ${r.unit}`, b: `${num(f.trend_to)} ${r.unit}` }))}</li>`);
+      }
+      const where = [f.server, f.stream].filter(Boolean).join(" · ");
+      return `<li><b>${escapeHtml(f.object)}</b>${where ? ` <span class="muted">${escapeHtml(where)}</span>` : ""}
+        <span class="muted">· ${escapeHtml(fmt(T.mp_usual, { v: `${num(f.usual)} ${r.unit}` }))}</span><ul>${lines.join("")}</ul></li>`;
+    }).join("");
+    $("#mp-result").innerHTML = `<p class="muted mp-history">${escapeHtml(hist)}${r.history_days < 7 ? ` ${escapeHtml(T.mp_history_short)}` : ""}</p>
+      ${common}${items ? `<ul class="mp-list">${items}</ul>` : `<p class="muted">${escapeHtml(T.mp_none)}</p>`}`;
+  }
+
   $("#run").addEventListener("click", run);
+  $("#mp-run").addEventListener("click", runMeasures);
   $("#scope")?.addEventListener("change", async (e) => {
     const v = e.target.value;
     try { await api("/api/scope", { server_id: v === "" ? null : Number(v) }); } catch { return; }
     $("#pt-result").hidden = true;
     $("#pt-status").textContent = "";
+    $("#mp-result").innerHTML = "";
+    $("#mp-status").textContent = "";
+    loadMeasures();
   });
   $("#no-servers").hidden = window.HAS_SERVERS;
   $("#run").disabled = !window.HAS_SERVERS;
+  $("#mp-card").hidden = !window.HAS_SERVERS;
+  if (window.HAS_SERVERS) loadMeasures();
 })();

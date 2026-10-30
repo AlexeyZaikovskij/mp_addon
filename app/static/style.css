@@ -572,6 +572,16 @@ span.bad { color: var(--error-text); font-weight: 500; }
 .pt-items li { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; padding: 2px 0; }
 .pt-items .ov-dot { align-self: center; }
 .pt-advice { margin: 4px 0 0; font-size: 13px; color: var(--text-soft); }
+.mp-history { margin: 6px 0; }
+.mp-common { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--field); font-size: 13px; }
+.mp-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.mp-list > li { padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.mp-list ul { margin: 4px 0 0; padding-left: 4px; list-style: none; }
+/* Lower or higher is good or bad depending on the measure (bitrate vs latency): arrows, no colours. */
+.mp-down::before { content: "↓ "; color: var(--muted); }
+.mp-up::before { content: "↑ "; color: var(--muted); }
+#mp-measure { min-width: 280px; }
+#mp-measure optgroup.ch-off, #mp-measure option.ch-off { color: var(--muted); }
 .pt-flap { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pt-flap td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
 .pt-flap td:first-child { width: 14px; padding-top: 9px; }

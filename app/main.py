@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, charts, i18n, jobs, patterns, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
+from . import auth, charts, i18n, jobs, measure_patterns, patterns, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -599,6 +599,36 @@ async def api_patterns_start(body: PatternsIn, session: sessions.Session = Depen
         return await patterns.analyse(job, conns, tz, body.days, body.level)
 
     return {"id": jobs.start(session.user_id, {"kind": "patterns"}, work).id}
+
+
+@app.get("/api/patterns/measures")
+async def api_patterns_measures(session: sessions.Session = Depends(current_session)):
+    """Measures the channels of the shown servers have (for the measurement patterns)."""
+    conns = session.scoped()
+    if not conns:
+        raise sessions.NotConnected(None)
+    return await measure_patterns.measures(conns)
+
+
+class MeasurePatternsIn(BaseModel):
+    days: int = 7
+    analyzer_id: int
+    column: str = Field(max_length=120)
+
+
+@app.post("/api/patterns/measure")
+async def api_patterns_measure(body: MeasurePatternsIn, session: sessions.Session = Depends(current_session)):
+    if body.days not in patterns.PERIODS:
+        raise HTTPException(422, f"days: {patterns.PERIODS}")
+    conns = session.scoped()
+    if not conns:
+        raise sessions.NotConnected(None)
+    tz = session.time_zone
+
+    async def work(job: jobs.Job):
+        return await measure_patterns.analyse(job, conns, tz, body.days, body.analyzer_id, body.column)
+
+    return {"id": jobs.start(session.user_id, {"kind": "measure_patterns"}, work).id}
 
 
 @app.get("/api/patterns/{job_id}")

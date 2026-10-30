@@ -1,8 +1,8 @@
 """Patterns: alarms that come back at the same time of day (or of the week), alarms that flap, and when
 problems start (weekday x hour), from MultiProbe's alarm log over the last weeks, with rule-based advice.
 
-Measurements are not used: MultiProbe keeps them only a few days by default (Administration -> Cleanup,
-"Days to expire" 3), while the alarm log goes back months.
+Measurements are analysed apart (measure_patterns.py): MultiProbe keeps them only a few days by default
+(Administration -> Cleanup, "Days to expire" 3), while the alarm log goes back months.
 """
 import math
 import statistics

@@ -30,6 +30,18 @@
   {{ t("no_servers_connected") }} <a class="link" href="/servers">{{ t("nav_servers") }} →</a>
 </section>
 
+<section class="card" id="mp-card">
+  <h2>{{ t("mp_title") }}</h2>
+  <p class="muted note">{{ t("mp_hint") }}</p>
+  <div class="rec-pick pt-pick">
+    <label>{{ t("ch_measure") }}<br><select id="mp-measure"><option value="">{{ t("loading") }}</option></select></label>
+    <button type="button" class="primary" id="mp-run" disabled>{{ t("pt_run") }}</button>
+  </div>
+  <div id="mp-status" class="muted"></div>
+  <div class="rec-bar" id="mp-bar" hidden><div class="bar-fill" style="width:0"></div></div>
+  <div id="mp-result"></div>
+</section>
+
 <div id="pt-result" hidden>
   <section class="card">
     <h2>{{ t("pt_findings") }} <span class="counter" id="findings-count"></span></h2>

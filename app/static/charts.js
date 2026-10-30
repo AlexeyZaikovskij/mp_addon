@@ -203,6 +203,7 @@
     const analyzers = new Set();
     for (const x of p.cfg.objects) for (const a of p.known.get(keyOf(x.server_id, x.id))?.analyzers || []) analyzers.add(a);
     p.measures = [];
+    p.filled = null;
     if (analyzers.size) {
       try {
         p.measures = await measuresOf(p.cfg.objects[0], analyzers);
@@ -211,19 +212,49 @@
       }
     }
     renderMeasures(p);
+    loadFilled(p);
   }
 
-  const flatMeasures = (p) => p.measures.flatMap((a) => a.measures.map((m) => ({ ...m, aid: a.id, analyzer: a.name })));
+  // Which measures have values in the chart's period: the empty ones are greyed, empty groups go last.
+  // Asked again when the channels or the period change, not on every refresh (kept FILLED_TTL_MS).
+  const FILLED_TTL_MS = 5 * 60_000;
+  const filledCache = new Map();
+  async function loadFilled(p) {
+    if (!p.measures.length) return;
+    const body = { objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), hours: p.cfg.hours };
+    const key = JSON.stringify(body);
+    const hit = filledCache.get(key);
+    if (!hit || Date.now() - hit.at > FILLED_TTL_MS) {
+      filledCache.set(key, { at: Date.now(), data: api("/api/charts/filled", body).catch((err) => { filledCache.delete(key); throw err; }) });
+    }
+    try {
+      const data = await filledCache.get(key).data;
+      if (JSON.stringify({ objects: p.cfg.objects, analyzer_ids: p.measures.map((a) => a.id), hours: p.cfg.hours }) !== key) return;
+      p.filled = data;
+      renderMeasures(p);
+    } catch { /* without it the list is simply not greyed */ }
+  }
+
+  // An analyzer missing from `filled` could not be checked: it is shown as having values.
+  const groupFilled = (p, a) => !p.filled || !(a.id in p.filled) || p.filled[a.id].length > 0;
+  const measureFilled = (p, a, m) => !p.filled || !(a.id in p.filled) || p.filled[a.id].includes(m.column);
+  const orderedGroups = (p) => [...p.measures.filter((a) => groupFilled(p, a)), ...p.measures.filter((a) => !groupFilled(p, a))];
+  const flatMeasures = (p) => orderedGroups(p).flatMap((a) => a.measures.map((m) => ({ ...m, aid: a.id, analyzer: a.name })));
 
   function renderMeasures(p) {
     const sel = p.el.querySelector(".ch-mes");
     const cur = `${p.cfg.analyzer_id}|${p.cfg.column}`;
     if (!flatMeasures(p).some((m) => `${m.aid}|${m.column}` === cur)) { p.cfg.analyzer_id = null; p.cfg.column = null; }
-    sel.innerHTML = `<option value="">${escapeHtml(T.ch_pick)}</option>` + p.measures.map((a) =>
-      `<optgroup label="${escapeHtml(a.name)}">${a.measures.map((m) => {
+    sel.innerHTML = `<option value="">${escapeHtml(T.ch_pick)}</option>` + orderedGroups(p).map((a) => {
+      const empty = !groupFilled(p, a);
+      return `<optgroup label="${escapeHtml(empty ? `${a.name} — ${T.ch_empty_group}` : a.name)}"${empty ? ' class="ch-off"' : ""}>${a.measures.map((m) => {
         const v = `${a.id}|${m.column}`;
-        return `<option value="${escapeHtml(v)}"${v === cur ? " selected" : ""}>${escapeHtml(m.name)}${m.unit ? `, ${escapeHtml(m.unit)}` : ""}</option>`;
-      }).join("")}</optgroup>`).join("");
+        return `<option value="${escapeHtml(v)}"${v === cur ? " selected" : ""}${measureFilled(p, a, m) ? "" : ' class="ch-off"'}>${escapeHtml(m.name)}${m.unit ? `, ${escapeHtml(m.unit)}` : ""}</option>`;
+      }).join("")}</optgroup>`;
+    }).join("");
+    // The closed list shows an empty pick greyed too.
+    const picked = p.measures.find((a) => a.id === p.cfg.analyzer_id);
+    sel.classList.toggle("ch-off", !!picked && !measureFilled(p, picked, { column: p.cfg.column }));
   }
 
   function wire(p) {
@@ -263,7 +294,7 @@
       b.addEventListener("click", () => (b.dataset.step === "obj" ? stepObject : stepMeasure)(p, Number(b.dataset.dir)));
     }
     for (const b of p.el.querySelectorAll(".ch-periods button")) {
-      b.addEventListener("click", () => { p.cfg.hours = Number(b.dataset.h); applyLook(p); save(); loadData(p); });
+      b.addEventListener("click", () => { p.cfg.hours = Number(b.dataset.h); applyLook(p); save(); loadData(p); loadFilled(p); });
     }
     for (const b of p.el.querySelectorAll(".ch-sizes button")) {
       b.addEventListener("click", () => { p.cfg.size = b.dataset.size; applyLook(p); save(); });
@@ -303,7 +334,7 @@
   function pickMeasure(p, value) {
     const [aid, column] = value ? [Number(value.split("|")[0]), value.slice(value.indexOf("|") + 1)] : [null, null];
     Object.assign(p.cfg, { analyzer_id: aid, column });
-    p.el.querySelector(".ch-mes").value = value || "";
+    renderMeasures(p);
     renderPicker(p);
     save();
     loadData(p);

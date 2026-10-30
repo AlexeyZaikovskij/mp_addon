@@ -524,6 +524,8 @@ span.bad { color: var(--error-text); font-weight: 500; }
   font-size: 13px; color: var(--text); }
 .ch-item:hover { background: var(--hover); }
 .ch-item.muted { color: var(--muted); }
+.ch-mes option, .ch-mes optgroup { color: var(--text); }
+.ch-bar select.ch-mes.ch-off, .ch-mes optgroup.ch-off, .ch-mes option.ch-off { color: var(--muted); }
 .ch-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .ch-chips:empty { display: none; }
 .ch-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 4px 2px 8px;

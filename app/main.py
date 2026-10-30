@@ -630,6 +630,22 @@ async def api_charts_measures(server_id: int, analyzers: str, session: sessions.
     return await charts.measure_list(session.conn(server_id), ids)
 
 
+class ChartFilledIn(BaseModel):
+    objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
+    analyzer_ids: list[int] = Field(max_length=100)
+    hours: int = 24
+
+
+@app.post("/api/charts/filled")
+async def api_charts_filled(body: ChartFilledIn, session: sessions.Session = Depends(current_session)):
+    """Which measures of the chart's channels have values in its period (the others are greyed in the list)."""
+    if body.hours not in charts.PERIODS:
+        raise HTTPException(422, f"hours must be one of {charts.PERIODS}")
+    conns = {o.server_id: session.conn(o.server_id) for o in body.objects}
+    return await charts.filled(conns, [{"server_id": o.server_id, "object_id": o.id} for o in body.objects],
+                               body.analyzer_ids, body.hours)
+
+
 class ChartDataIn(BaseModel):
     objects: list[ChartObject] = Field(min_length=1, max_length=charts.MAX_OBJECTS)
     analyzer_id: int

@@ -68,6 +68,41 @@ async def measure_list(conn: Conn, analyzer_ids: list[int]) -> list[dict]:
     return sorted(out, key=lambda a: a["name"].lower())
 
 
+def _iso(t: datetime) -> str:
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def filled(conns: dict[int, Conn], objects: list[dict], analyzer_ids: list[int], hours: int) -> dict[int, list[str]]:
+    """Measures of these analyzers that have values for any of the objects ({server_id, object_id}) over the
+    last `hours`: {analyzer id: [columns]}. One request per server and analyzer, the whole period in one
+    aggregated bucket (0.02-0.5 s for a channel on the test systems)."""
+    end = datetime.now(timezone.utc)
+    begin = end - timedelta(hours=hours)
+    bucket = ({"interpolationIntervalType": "days", "interpolationInterval": hours // 24} if hours % 24 == 0 and hours > 24
+              else {"interpolationIntervalType": "hours", "interpolationInterval": hours})
+    work = []
+    for sid in {o["server_id"] for o in objects}:
+        conn = conns[sid]
+        catalog = await mp_client.measure_catalog(conn)
+        oids = [o["object_id"] for o in objects if o["server_id"] == sid]
+        for aid in set(analyzer_ids):
+            cols = [m["columnName"] for m in (catalog.get(aid) or {}).get("measureItemList") or []
+                    if not str(m.get("dataType") or "").startswith("xml")]
+            if cols:
+                work.append((conn, aid, oids, cols))
+
+    async def one(conn, aid, oids, cols):
+        items = await mp_client.measure_data(conn, aid, oids, cols, _iso(begin), _iso(end), bucket)
+        return aid, {col for it in items for b in it.get("boxPlotDataList") or []
+                     for col, v in (b.get("valuesMap") or {}).items() if v and v.get("average") is not None}
+
+    out: dict[int, set] = {}
+    for res in await asyncio.gather(*(one(*w) for w in work), return_exceptions=True):
+        if not isinstance(res, Exception):
+            out.setdefault(res[0], set()).update(res[1])
+    return {aid: sorted(cols) for aid, cols in out.items()}
+
+
 async def series(conns: dict[int, Conn], objects: list[dict], analyzer_id: int, column: str, hours: int,
                  tz: ZoneInfo) -> dict:
     """Values of one measure of several objects ({server_id, object_id}) over the last `hours`: average (and

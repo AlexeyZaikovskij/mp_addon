@@ -358,6 +358,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "ch_n_channels": {"en": "{n} channels", "ru": "Каналов: {n}"},
     "ch_remove_channel": {"en": "Remove from the chart", "ru": "Убрать с графика"},
     "ch_too_many": {"en": "At most {n} channels on one chart", "ru": "На одном графике не больше {n} каналов"},
+    "ch_empty_group": {"en": "no values", "ru": "нет значений"},
     "ch_minmax": {"en": "min {a} · max {b}", "ru": "мин {a} · макс {b}"},
     "ov_updated": {"en": "Updated", "ru": "Обновлено"},
     "ov_auto_refresh": {"en": "Auto-refresh (30 s)", "ru": "Автообновление (30 с)"},

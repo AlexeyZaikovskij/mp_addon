@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, charts, i18n, jobs, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
+from . import auth, charts, i18n, jobs, patterns, mp_client, overview, recordings, scheduler, server_info, services, sessions, storage
 from .config import ROOT, settings
 from .reports import alarms as alarm_report
 from .reports import measures as measure_report
@@ -573,6 +573,40 @@ async def api_overview_state(session: sessions.Session = Depends(current_session
 async def api_overview_servers(session: sessions.Session = Depends(current_session)):
     """Load, objects and licences of the shown servers (MultiProbe's Administration -> Nodes)."""
     return await server_info.servers(session.scoped(), _user_tz(session))
+
+
+# --- Patterns: recurring alarms over the last weeks ------------------------------------------------------
+@app.get("/patterns", response_class=HTMLResponse)
+async def patterns_page(request: Request, session: sessions.Session = Depends(current_session)):
+    return render(request, "patterns.html", session=session, strings=i18n.bundle(i18n.pick_lang(request)))
+
+
+class PatternsIn(BaseModel):
+    days: int = 14
+    level: int = 200
+
+
+@app.post("/api/patterns")
+async def api_patterns_start(body: PatternsIn, session: sessions.Session = Depends(current_session)):
+    if body.days not in patterns.PERIODS or body.level not in patterns.LEVELS:
+        raise HTTPException(422, f"days: {patterns.PERIODS}, level: {patterns.LEVELS}")
+    conns = session.scoped()
+    if not conns:
+        raise sessions.NotConnected(None)
+    tz = session.time_zone
+
+    async def work(job: jobs.Job):
+        return await patterns.analyse(job, conns, tz, body.days, body.level)
+
+    return {"id": jobs.start(session.user_id, {"kind": "patterns"}, work).id}
+
+
+@app.get("/api/patterns/{job_id}")
+async def api_patterns_get(job_id: str, session: sessions.Session = Depends(current_session)):
+    job = jobs.get(job_id, session.user_id)
+    if job is None:
+        raise HTTPException(404, "not found")
+    return {**job.progress(), "result": job.result if job.state == "done" else None}
 
 
 # --- Charts: each user's own board ------------------------------------------------------------------------

@@ -52,6 +52,11 @@ spec: `/swagger/v2/swagger.json`).
 
 ## Measurements
 
+**Retention:** measurements are kept only a few days by default — MultiProbe's Administration → Cleanup,
+"Days to expire" **3** for every `Measure.*_Cleanup` table (431 tables, "Bulk change" edits several). The alarm
+log goes back months (Hetzner: events 90 days ago), so the Patterns page works on alarms; a longer measurement
+history needs a bigger "Days to expire" there (or the Toolkit collecting its own aggregates).
+
 `POST /api/Measurement/LogData/Find`
 
 ```json

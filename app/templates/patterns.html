@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <div class="title-row">
+      <h1>{{ t("nav_patterns") }}</h1>
+      {% include "_scope.html" %}
+    </div>
+  </div>
+  <p class="muted">{{ t("pt_hint") }}</p>
+  <div class="rec-pick pt-pick">
+    <label>{{ t("pt_period") }}<br>
+      <span class="presets" id="days">
+        {% for d in [7, 14, 28] %}<button type="button" data-days="{{ d }}"{{ ' class="active"' if d == 14 }}>{{ t("pt_days", n=d) }}</button>{% endfor %}
+      </span>
+    </label>
+    <label>{{ t("pt_level") }}<br>
+      <select id="level">
+        {% for l in [100, 200, 300] %}<option value="{{ l }}"{{ " selected" if l == 200 }}>{{ t("pt_level_" ~ l) }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="button" class="primary" id="run">{{ t("pt_run") }}</button>
+  </div>
+  <div id="pt-status" class="muted"></div>
+  <div class="rec-bar" id="pt-bar" hidden><div class="bar-fill" style="width:0"></div></div>
+</section>
+
+<section class="card notice-card" id="no-servers" hidden>
+  {{ t("no_servers_connected") }} <a class="link" href="/servers">{{ t("nav_servers") }} →</a>
+</section>
+
+<div id="pt-result" hidden>
+  <section class="card">
+    <h2>{{ t("pt_findings") }} <span class="counter" id="findings-count"></span></h2>
+    <div id="findings"></div>
+  </section>
+  <div class="pt-grid">
+    <section class="card">
+      <h2>{{ t("pt_heat") }}</h2>
+      <p class="muted note">{{ t("pt_heat_hint") }}</p>
+      <div id="heat" class="pt-heat"></div>
+    </section>
+    <section class="card">
+      <h2>{{ t("pt_flapping") }} <span class="counter" id="flapping-count"></span></h2>
+      <p class="muted note" id="flapping-hint"></p>
+      <div id="flapping"></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.I18N = {{ strings | tojson }}; window.HAS_SERVERS = {{ "true" if session.conns else "false" }};</script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/patterns.js?v={{ static_version() }}"></script>
+{% endblock %}

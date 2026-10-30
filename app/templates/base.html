@@ -21,6 +21,7 @@
           {% set path = request.url.path %}
           <a href="/" class="{{ 'active' if path == '/' }}">{{ t("nav_overview") }}</a>
           <a href="/charts" class="{{ 'active' if path == '/charts' }}">{{ t("nav_charts") }}</a>
+          <a href="/patterns" class="{{ 'active' if path == '/patterns' }}">{{ t("nav_patterns") }}</a>
           <a href="/reports" class="{{ 'active' if path.startswith('/report') }}">{{ t("nav_reports") }}</a>
           <a href="/templates" class="{{ 'active' if path == '/templates' }}">{{ t("nav_templates") }}</a>
           <a href="/recordings" class="{{ 'active' if path == '/recordings' }}">{{ t("nav_recordings") }}</a>

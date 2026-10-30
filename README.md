@@ -37,6 +37,7 @@ when a file under `app/` changes, and listens on localhost only.
 | `app/storage.py` | Report templates (SQLite in `data/addon.db`, set `DATA_DIR` to move it) |
 | `app/reports/` | Alarm report: fetching, availability, timeline, CSV/XML export |
 | `app/charts.py` | Charts page: each user's own board of charts (one measure of up to 8 channels, also of different servers; period, size) |
+| `app/patterns.py` | Patterns page: alarms recurring at the same time of day / week, flapping alarms, weekday × hour heatmap, rule-based advice |
 | `app/recordings.py` | Recordings: timeline, HLS preview through the Toolkit, MP4/MP3 export (PyAV) |
 | `app/scheduler.py` | Scheduled exports: one-time and daily jobs, a period cut into pieces saved one by one as MP4/MP3 into admin-allowed folders |
 | `app/auth.py` | Toolkit passwords (scrypt) and the lock-out after failed sign-ins |
@@ -68,4 +69,5 @@ when a file under `app/` changes, and listens on localhost only.
 4f. ✅ Kept MultiProbe passwords (automatic connect and re-login), scheduled exports of recordings ("Jobs")
 4g. ✅ Overview's servers block; Services page (status, start / stop / restart, start all / stop all, start type on this computer)
 4h. ✅ Charts: a board of your own MultiProbe measurement charts in a grid, channels and measures switched in place
+4i. ✅ Patterns: recurring and flapping alarms from MultiProbe's alarm log, with advice
 5. Windows service + offline installer
